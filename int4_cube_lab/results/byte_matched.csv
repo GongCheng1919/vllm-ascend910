@@ -1,0 +1,7 @@
+kernel,M,N,K,K_bytes,avg_us,tflops
+perchannel_int8_gemm,2048,2048,2048,2048,59.58,288.34
+perchannel_int4_gemm,2048,2048,4096,2048,59.83,574.25
+perchannel_int8_gemm,4096,4096,4096,4096,353.43,388.87
+perchannel_int4_gemm,4096,4096,8192,4096,349.66,786.13
+perchannel_int8_gemm,8192,8192,8192,8192,2767.31,397.32
+perchannel_int4_gemm,8192,8192,16384,8192,2791.76,787.68

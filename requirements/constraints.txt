@@ -1,0 +1,11 @@
+# vLLM Ascend 0.13 runtime validated on this host.
+torch==2.8.0
+torch-npu==2.8.0.post2
+torchvision==0.23.0
+vllm==0.13.0
+vllm-ascend==0.13.0
+triton-ascend==3.2.0
+transformers==4.57.6
+numpy==1.26.4
+matplotlib==3.10.9
+

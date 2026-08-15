@@ -1,0 +1,45 @@
+# This tree is ~185 GB on disk; almost all of it is model weights and
+# quantised-checkpoint caches that must never enter git.  Source, kernels,
+# checkpoints (MGCKPT/), reports and CSV results are what is tracked.
+
+# ---- model weights / quantised checkpoints (120 GB + 59 GB) ----
+models/
+fakequant_lab/gptq_*/
+
+# ---- build trees ----
+build/
+build-*/
+*.o
+*.so
+*.a
+*.egg-info/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ---- large run artifacts (keep the CSVs, drop the dumps) ----
+results/*/
+*.bin
+*.npy
+*.npz
+*.pt
+*.pth
+*.safetensors
+*.gguf
+*.prof
+*.json.gz
+
+# msprof output
+*PROF_*/
+prof_*/
+
+# editor / OS
+.DS_Store
+*.swp
+
+# NPU exception dumps (~200 MB of debug artifacts, not source)
+extra-info/data-dump/
+
+# vLLM torch.compile cache (generated)
+.runtime/

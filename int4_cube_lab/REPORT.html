@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>910B4 原生 INT4 Cube 验证 + BF16 / INT8 / INT4 GEMM 吞吐对比</title>
+<style>
+  :root {
+    --bg: #f5f7fa;
+    --card: #ffffff;
+    --ink: #1f2937;
+    --muted: #6b7280;
+    --line: #e5e7eb;
+    --accent: #0f4c81;
+    --int4: #dc2626;
+    --int8: #3b82f6;
+    --int8off: #f59e0b;
+    --bf16: #9ca3af;
+    --w4a16: #8b5cf6;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.65;
+  }
+  header.hero {
+    background: linear-gradient(135deg, #0b2e4f 0%, #0f4c81 55%, #16679c 100%);
+    color: #fff;
+    padding: 48px 24px 40px;
+    text-align: center;
+  }
+  header.hero h1 { margin: 0 0 10px; font-size: 28px; letter-spacing: .5px; }
+  header.hero .sub { opacity: .85; font-size: 15px; margin-bottom: 26px; }
+  .kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 14px;
+    max-width: 1080px;
+    margin: 0 auto;
+  }
+  .kpi {
+    background: rgba(255,255,255,.10);
+    border: 1px solid rgba(255,255,255,.18);
+    border-radius: 12px;
+    padding: 14px 16px;
+    backdrop-filter: blur(4px);
+  }
+  .kpi .v { font-size: 26px; font-weight: 700; color: #ffd166; }
+  .kpi .k { font-size: 12.5px; opacity: .9; margin-top: 4px; }
+  nav.toc {
+    position: sticky; top: 0; z-index: 50;
+    background: #fff; border-bottom: 1px solid var(--line);
+    padding: 10px 16px; text-align: center;
+    box-shadow: 0 1px 4px rgba(0,0,0,.05);
+  }
+  nav.toc a {
+    display: inline-block; margin: 2px 8px; padding: 4px 10px;
+    color: var(--accent); text-decoration: none; font-size: 13.5px;
+    border-radius: 999px;
+  }
+  nav.toc a:hover { background: #e8f0f8; }
+  main { max-width: 1080px; margin: 0 auto; padding: 30px 20px 60px; }
+  section { margin-bottom: 44px; }
+  h2 {
+    font-size: 21px; margin: 0 0 6px; padding-left: 12px;
+    border-left: 4px solid var(--accent); color: #0b2e4f;
+  }
+  h3 { font-size: 16.5px; margin: 26px 0 10px; color: #123c63; }
+  p { margin: 8px 0; }
+  .lead { font-size: 15.5px; }
+  strong.hl { color: var(--int4); }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 22px 24px; margin-top: 18px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.04);
+  }
+  table {
+    width: 100%; border-collapse: collapse; margin: 14px 0;
+    font-size: 13.5px;
+  }
+  th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--line); }
+  th { background: #f0f4f8; color: #33475b; font-weight: 600; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  tbody tr:hover { background: #fafcff; }
+  td.hl { color: var(--int4); font-weight: 700; }
+  td.best { color: var(--int4); font-weight: 700; background: #fef2f2; }
+  .foot { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+  .callout { border-radius: 10px; padding: 12px 16px; margin: 14px 0; font-size: 14px; }
+  .callout.warn { background: #fff7ed; border: 1px solid #fed7aa; color: #7c2d12; }
+  .callout.info { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a5f; }
+  .callout.ok   { background: #f0fdf4; border: 1px solid #bbf7d0; color: #14532d; }
+  .callout b { font-weight: 700; }
+  code, pre {
+    font-family: "SF Mono", "JetBrains Mono", Consolas, monospace;
+    font-size: 12.5px;
+  }
+  code { background: #eef2f6; padding: 1px 5px; border-radius: 4px; }
+  pre {
+    background: #0f172a; color: #e2e8f0; padding: 14px 16px;
+    border-radius: 10px; overflow-x: auto; line-height: 1.55;
+  }
+  pre code { background: none; color: inherit; padding: 0; }
+  .chart { width: 100%; height: auto; margin: 10px 0 4px; }
+  .legend { font-size: 12.5px; color: var(--muted); margin: 4px 0 10px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+  footer { border-top: 1px solid var(--line); margin-top: 30px; padding-top: 18px; color: var(--muted); font-size: 13px; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+  .tag { display:inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; margin-left: 6px; }
+  .tag.red { background:#fee2e2; color:#991b1b; }
+  .tag.blue { background:#dbeafe; color:#1e40af; }
+  .tag.gray { background:#e5e7eb; color:#374151; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <h1>910B4 原生 INT4 Cube 验证<br>BF16 / INT8 / INT4 GEMM 吞吐对比报告</h1>
+  <div class="sub">日期：2026-08-10 · 环境：Ascend 910B4 + CANN 8.5.0 + torch_npu 2.7.1 · Lab：<code style="color:#ffd166">vllm/int4_cube_lab</code> · 设备：<b>device 1</b></div>
+  <div class="kpis">
+    <div class="kpi"><div class="v">778.6 TFLOPS</div><div class="k">手写 INT4 kernel @ 8192³（本机峰值基准）</div></div>
+    <div class="kpi"><div class="v">2.00×</div><div class="k">vs 同结构 INT8 kernel（byte-matched 实验 1.98–2.02×）</div></div>
+    <div class="kpi"><div class="v">3.55×</div><div class="k">vs 官方 BF16 torch.mm @ 8192³</div></div>
+    <div class="kpi"><div class="v">4.2–10.9×</div><div class="k">vs 官方 W4A16 路径（vLLM 今天的 W4 路径，decode 档）</div></div>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#summary">一句话结论</a>
+  <a href="#square">方阵吞吐</a>
+  <a href="#byte-matched">字节配平实验</a>
+  <a href="#small-shape">为什么小 shape 达不到 2×</a>
+  <a href="#qwen3">Qwen3-32B 真实 MLP 形状</a>
+  <a href="#reading">读法</a>
+  <a href="#w4a8">对 vLLM W4A8 的推论</a>
+  <a href="#impl">实现要点</a>
+  <a href="#correctness">正确性</a>
+  <a href="#env">环境</a>
+  <a href="#repro">复现</a>
+</nav>
+
+<main>
+
+<!-- ================= 一句话结论 ================= -->
+<section id="summary">
+  <h2>一句话结论</h2>
+  <div class="card">
+    <p class="lead"><b>910B4 原生支持 INT4 Cube（<code>mad_s4</code>），且其吞吐正好是 INT8 Cube 的 2.0 倍。</b></p>
+    <p>手写 <code>perchannel_int4_gemm</code> 在 8192³ 达到 <strong class="hl">778 TFLOPS</strong>，是
+      同结构 INT8 kernel（390 TFLOPS）的 <b>2.00×</b>、官方 <code>npu_quant_matmul</code> INT8（405 TFLOPS）的
+      <b>1.92×</b>、官方 BF16 <code>torch.mm</code>（219 TFLOPS）的 <b>3.55×</b>。</p>
+    <p>在 Qwen3-32B 真实 MLP 形状（M=1..1024）下，INT4 对同结构 INT8 全程领先 <b>1.78–2.74×</b>；
+      对官方 W4A16（<code>npu_weight_quant_batchmatmul</code>）快 <b>4.2–10.9×</b>——后者正是
+      <b>vLLM 今天的 W4 路径，对 decode 是负优化</b>（比 BF16 还慢），这是本轮最有行动价值的发现。</p>
+  </div>
+</section>
+
+<!-- ================= 方阵吞吐 ================= -->
+<section id="square">
+  <h2>1. 方阵吞吐总表（M = N = K，TFLOPS，越高越好）</h2>
+  <div class="card">
+    <table id="tbl-square-tflops">
+      <thead><tr>
+        <th>M=N=K</th>
+        <th>BF16 <code>torch.mm</code></th>
+        <th>INT8 <code>npu_quant_matmul</code></th>
+        <th>INT8 本文 kernel</th>
+        <th><b style="color:var(--int4)">INT4 本文 kernel</b></th>
+        <th>INT4 / INT8(本文)</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>512</td><td>10.33¹</td><td>6.60¹</td><td>20.32</td><td class="best">21.95</td><td>1.08×</td></tr>
+        <tr><td>1024</td><td>84.90¹</td><td>52.81¹</td><td>98.73</td><td class="best">118.57</td><td>1.20×</td></tr>
+        <tr><td>2048</td><td>198.77</td><td>241.47</td><td>292.89</td><td class="best">392.20</td><td>1.34×</td></tr>
+        <tr><td>4096</td><td>246.19</td><td>380.55</td><td>395.61</td><td class="best">685.12</td><td>1.73×</td></tr>
+        <tr><td>8192</td><td>219.07</td><td>404.76</td><td>389.78</td><td class="best">778.57</td><td>2.00×</td></tr>
+      </tbody>
+    </table>
+    <div class="chart" id="chart-square"></div>
+    <p class="foot">¹ 512/1024 这两档，官方路径的数字是 <b>PyTorch 侧 host 分发开销</b>（每次调用约 25–40 µs 的 Python/ATen 成本）而不是 cube 时间——kernel 本身比分发还快。这两格不能用来比较硬件，只能说明“从 Python 调小 GEMM 时框架开销占主导”。本文 kernel 走 C++ <code>aclrtLaunchKernel</code>，没有这层开销。</p>
+
+    <h3>延迟（µs，越低越好）</h3>
+    <table id="tbl-square-us">
+      <thead><tr>
+        <th>M=N=K</th><th>BF16</th><th>INT8 官方</th><th>INT8 本文</th><th><b style="color:var(--int4)">INT4 本文</b></th>
+      </tr></thead>
+      <tbody>
+        <tr><td>512</td><td>26.0</td><td>40.6</td><td>13.2</td><td class="best">12.2</td></tr>
+        <tr><td>1024</td><td>25.3</td><td>40.7</td><td>21.8</td><td class="best">18.1</td></tr>
+        <tr><td>2048</td><td>86.4</td><td>71.2</td><td>58.7</td><td class="best">43.8</td></tr>
+        <tr><td>4096</td><td>558.3</td><td>361.2</td><td>347.4</td><td class="best">200.6</td></tr>
+        <tr><td>8192</td><td>5018.9</td><td>2716.4</td><td>2820.8</td><td class="best">1412.2</td></tr>
+      </tbody>
+    </table>
+    <div class="callout ok"><b>本文 INT8 kernel = 官方 INT8 的 96–98%</b>（4096³/8192³），说明这套手写流水已经是生产级水准，因此 INT4 的数字不是“和弱基线比”得来的。</div>
+  </div>
+</section>
+
+<!-- ================= 字节配平 ================= -->
+<section id="byte-matched">
+  <h2>2. 关键实验：字节配平（byte-matched）——排除“带宽假象”</h2>
+  <div class="card">
+    <p>上表里 INT4 在同样的 (M,N,K) 下只搬一半的字节，所以“快 2 倍”原则上也可能只是
+      <b>访存量减半</b>造成的，而不是 cube 真的更快。为了区分，把 INT4 的 K 翻倍，让两者
+      <b>搬运字节数完全相同、Nd2Nz / LoadData / Mmad 指令条数也完全相同</b>，唯一差别是每条 Mmad 覆盖的 K 是 2 倍：</p>
+    <table>
+      <thead><tr>
+        <th>M=N</th><th>K(int8)</th><th>K(int4)</th><th>K 字节</th>
+        <th>INT8 µs</th><th>INT4 µs</th><th>时间比</th>
+        <th>INT8 TFLOPS</th><th>INT4 TFLOPS</th><th><b>算力比</b></th>
+      </tr></thead>
+      <tbody>
+        <tr><td>2048</td><td>2048</td><td>4096</td><td>2048</td><td>59.58</td><td>59.83</td><td>1.004×</td><td>288.34</td><td class="hl">574.25</td><td><b>1.99×</b></td></tr>
+        <tr><td>4096</td><td>4096</td><td>8192</td><td>4096</td><td>353.43</td><td>349.66</td><td>0.989×</td><td>388.87</td><td class="hl">786.13</td><td><b>2.02×</b></td></tr>
+        <tr><td>8192</td><td>8192</td><td>16384</td><td>8192</td><td>2767.31</td><td>2791.76</td><td>1.009×</td><td>397.32</td><td class="hl">787.68</td><td><b>1.98×</b></td></tr>
+      </tbody>
+    </table>
+    <div class="chart" id="chart-byte"></div>
+    <div class="callout ok"><b>同样的字节、同样的指令条数、同样的墙上时间，INT4 完成了 2 倍的乘加。</b>
+      这只能由 cube 单元本身的 s4 通路解释，不可能是带宽或指令开销带来的。</div>
+  </div>
+</section>
+
+<!-- ================= 小 shape ================= -->
+<section id="small-shape">
+  <h2>3. 为什么小 shape 达不到 2×</h2>
+  <div class="card">
+    <p>INT4 的 2× 只在 cube 真正成为瓶颈时才兑现。128×128 输出 tile 的算术强度与 K 无关；K 越大，单 tile 的
+      cube 时间越长，越能盖住 GM→L1 的搬运和 AIC↔AIV 的交接。512³/1024³ 时 tile 数（16/64）还填不满 20 个 cube 核、
+      且每 tile 的 K 太短，MTE2 与流水启动占主导，所以比值只有 1.08–1.20×。到 8192³（4096 个 tile、K=8192）
+      比值收敛到 2.00×。</p>
+    <div class="callout warn">
+      <b>⚠️ 这一节的推论被第二轮实测推翻了（见第 4 节）。</b>当时据此预测“decode（M 小）收益会退化到接近 INT8”——
+      <b>这个预测是错的</b>。它只对<b>方阵</b>成立：512³ 的总工作量本来就小、tile 数填不满 20 个核。
+      真实的 MLP 形状即使 M=1，N 也有 51200（400 个 n-tile），并行度充足且处于<b>访存瓶颈</b>，
+      INT4 照样赢 1.78–1.97×。小方阵吃亏的原因是“总量太小”，不是“M 太小”。
+    </div>
+  </div>
+</section>
+
+<!-- ================= Qwen3 ================= -->
+<section id="qwen3">
+  <h2>4. Qwen3-32B 真实 MLP 形状（第二轮，cold）</h2>
+  <div class="card">
+    <p>维度取 Qwen3-32B（hidden=5120, intermediate=25600, TP=1）：</p>
+    <ul>
+      <li><code>gate_up_proj</code>：N = 2×25600 = <b>51200</b>，K = <b>5120</b></li>
+      <li><code>down_proj</code>：N = <b>5120</b>，K = <b>25600</b></li>
+      <li>M = 1, 4, 16, 64, 128, 512, 1024</li>
+    </ul>
+    <div class="callout info"><b>测量方法修正：</b>910B4 的 L2 是 <b>168 MiB</b>，反复用同一个权重会让权重一直待在 L2，
+      真实推理（64 层各自的权重都从 HBM 流过来）不会这样。实测 <code>down_proj</code> M=1：INT4 热 35.8 µs → 冷 63.8 µs
+      （慢 78%），INT8 热 101.3 µs → 冷 115.0 µs（慢 14%）。INT4 权重更小、更容易整个装进 L2，所以<b>热测量会系统性夸大
+      INT4 优势</b>（热态下一度报出 2.8–3.0×）。因此本节所有数字都是 <b>cold</b>：轮换足够多份权重副本（总量 &gt;1 GiB）把
+      L2 冲掉，自定义 kernel 和官方路径一样处理。</div>
+
+    <h3>gate_up_proj（N=51200, K=5120）— 延迟 µs，越低越好</h3>
+    <table id="tbl-gateup">
+      <thead><tr>
+        <th>M</th><th>BF16</th><th>INT8 官方</th><th>W4A16 官方</th><th>INT8 本文</th>
+        <th><b style="color:var(--int4)">INT4 本文</b></th>
+        <th>INT4 TFLOPS</th><th>×INT8本文</th><th>×INT8官方</th><th>×BF16</th><th>×W4A16</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>1</td><td>438.8</td><td>334.7</td><td>729.1</td><td>229.1</td><td class="best">119.4</td><td>4.4</td><td>1.92</td><td>2.80</td><td>3.67</td><td>6.10</td></tr>
+        <tr><td>4</td><td>442.2</td><td>332.0</td><td>730.4</td><td>231.7</td><td class="best">119.1</td><td>17.6</td><td>1.95</td><td>2.79</td><td>3.71</td><td>6.13</td></tr>
+        <tr><td>16</td><td>506.4</td><td>333.3</td><td>734.7</td><td>230.8</td><td class="best">119.2</td><td>70.3</td><td>1.94</td><td>2.80</td><td>4.25</td><td>6.16</td></tr>
+        <tr><td>64</td><td>487.7</td><td>240.0</td><td>751.4</td><td>263.1</td><td class="best">133.6</td><td>251.1</td><td>1.97</td><td>1.80</td><td>3.65</td><td>5.62</td></tr>
+        <tr><td>128</td><td>522.3</td><td>340.7</td><td>790.6</td><td>327.9</td><td class="best">161.0</td><td>416.9</td><td>2.04</td><td>2.12</td><td>3.25</td><td>4.91</td></tr>
+        <tr><td>512</td><td>1544.6</td><td>825.5</td><td>1176.8</td><td>1161.8</td><td class="best">583.2</td><td>460.3</td><td>1.99</td><td>1.42</td><td>2.65</td><td>2.02</td></tr>
+        <tr><td>1024</td><td>2677.3</td><td>1573.2</td><td>2501.3</td><td>2296.6</td><td class="best">1181.2</td><td>454.5</td><td>1.94</td><td>1.33</td><td>2.27</td><td>2.12</td></tr>
+      </tbody>
+    </table>
+    <div class="chart" id="chart-gateup"></div>
+
+    <h3>down_proj（N=5120, K=25600）— 延迟 µs，越低越好</h3>
+    <table id="tbl-downproj">
+      <thead><tr>
+        <th>M</th><th>BF16</th><th>INT8 官方</th><th>W4A16 官方</th><th>INT8 本文</th>
+        <th><b style="color:var(--int4)">INT4 本文</b></th>
+        <th>INT4 TFLOPS</th><th>×INT8本文</th><th>×INT8官方</th><th>×BF16</th><th>×W4A16</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>1</td><td>217.1</td><td>157.1</td><td>691.6</td><td>114.4</td><td class="best">64.2</td><td>4.1</td><td>1.78</td><td>2.45</td><td>3.38</td><td>10.77</td></tr>
+        <tr><td>4</td><td>216.8</td><td>155.3</td><td>691.2</td><td>114.4</td><td class="best">64.1</td><td>16.4</td><td>1.79</td><td>2.42</td><td>3.38</td><td>10.79</td></tr>
+        <tr><td>16</td><td>218.7</td><td>157.5</td><td>699.3</td><td>115.0</td><td class="best">63.9</td><td>65.6</td><td>1.80</td><td>2.46</td><td>3.42</td><td>10.94</td></tr>
+        <tr><td>64</td><td>236.2</td><td>158.8</td><td>708.4</td><td>132.8</td><td class="best">73.6</td><td>228.1</td><td>1.81</td><td>2.16</td><td>3.21</td><td>9.63</td></tr>
+        <tr><td>128</td><td>254.0</td><td>163.1</td><td>751.3</td><td>167.9</td><td class="best">86.0</td><td>389.9</td><td>1.95</td><td>1.90</td><td>2.95</td><td>8.73</td></tr>
+        <tr><td>512</td><td>756.1</td><td>447.6</td><td>947.9</td><td>549.7</td><td class="best">216.5</td><td>619.9</td><td>2.54</td><td>2.07</td><td>3.49</td><td>4.38</td></tr>
+        <tr><td>1024</td><td>1430.0</td><td>962.9</td><td>1641.5</td><td>1068.5</td><td class="best">389.8</td><td>688.6</td><td>2.74</td><td>2.47</td><td>3.67</td><td>4.21</td></tr>
+      </tbody>
+    </table>
+    <div class="chart" id="chart-downproj"></div>
+
+    <div class="callout ok"><b>INT4 在 M=1..1024 全程领先，倍数 1.78–2.74×（对同结构 INT8）</b>，而不是方阵测试里那样
+      “只有大 M 才有 2×”。原因变了：方阵 8192³ 是 cube 瓶颈；这些 MLP 形状在整个 M 区间都是<b>访存瓶颈</b>
+      （小 M 是 HBM 权重流，大 M 是 L2 带宽），而 INT4 在每一层存储上都恰好减半。<code>down_proj</code> 大 M 出现
+      2.5–2.7×（超过 2×）是因为 INT4 的工作集更小、L2 命中更好——这是真实收益，但属于访存层级效应，不是 cube 又变快了。</div>
+  </div>
+</section>
+
+<!-- ================= 读法 ================= -->
+<section id="reading">
+  <h2>5. 读法（三条最有价值的洞察）</h2>
+  <div class="card">
+    <table>
+      <thead><tr><th style="text-align:left">#</th><th style="text-align:left">发现</th><th style="text-align:left">行动含义</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td style="text-align:left"><b>INT4 在真实 MLP 形状全程领先 1.78–2.74×</b>（对同结构 INT8），而非只有大 M 才 2×；<br>方阵 8192³ 是 cube 瓶颈，MLP 形状是访存瓶颈，INT4 两者都占优。</td>
+          <td style="text-align:left">INT4 收益对 decode 与 prefill 同时成立。</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td style="text-align:left"><b>官方 W4A16 在小 M 比 BF16 还慢</b>（729 vs 439 µs）：它把 int4 反量化成 bf16 再走 bf16 cube，权重省了但算力没省，反量化开销还盖过了收益。<b>这就是 vLLM 今天的 W4 路径——对 decode 是负优化。</b>本文 int4-cube kernel 比它快 <b>4.2–10.9×</b>。</td>
+          <td style="text-align:left">本轮最有行动价值的一条：替换 vLLM 的 W4A16 实现。</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td style="text-align:left">本文 INT8 kernel 在这些形状的大 M 端落后官方 1.33–1.42×（方阵 8192³ 是打平的）。</td>
+          <td style="text-align:left">“×INT8官方”列在 M=512/1024 <b>低估</b>了硬件潜力——把 INT4 kernel 按官方 INT8 的水平调优后，还有约 <b>1.4×</b> 的空间。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ================= W4A8 推论 ================= -->
+<section id="w4a8">
+  <h2>6. 对 vLLM W4A8 的推论（分析，非实测）</h2>
+  <div class="card">
+    <p>本文实测的是 <b>W4A4</b>（两个操作数都是 int4）。cube 要求两个操作数等宽，所以 W4A8 只能：</p>
+    <table>
+      <thead><tr><th style="text-align:left">方案</th><th style="text-align:left">算力</th><th style="text-align:left">权重访存</th><th style="text-align:left">结论</th></tr></thead>
+      <tbody>
+        <tr>
+          <td style="text-align:left"><b>把权重升到 int8</b></td>
+          <td style="text-align:left">cube 的 2× 全部丢掉</td>
+          <td style="text-align:left">减半</td>
+          <td style="text-align:left">decode（访存瓶颈）仍有收益，prefill 基本无收益</td>
+        </tr>
+        <tr>
+          <td style="text-align:left"><b>MSD 分解</b>（A8 = 16·A_hi + A_lo）</td>
+          <td style="text-align:left">2 次 int4 GEMM = 2× 速率下与单次 int8 GEMM <b>打平</b></td>
+          <td style="text-align:left">减半</td>
+          <td style="text-align:left">decode 净赚、prefill 不亏；若需 3 次分解则 prefill 反而亏。<b>分解项数是成败关键，值得先确认。</b></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ================= 实现要点 ================= -->
+<section id="impl">
+  <h2>7. 实现要点（<code>kernels/perchannel_lowbit_gemm.inc</code>）</h2>
+  <div class="card">
+    <p>一份源码同时编译出 INT4 和 INT8 两个 kernel（<code>QBITS</code> 宏），<b>所有缓冲区、DMA 描述符、LoadData 描述符
+      全部按字节表达</b>——INT4 fractal (16×64 元素) 和 INT8 fractal (16×32 元素) 都是 512 字节，C0 都是 32 字节，
+      所以两个 build 的搬运和指令数逐条对应，只有 <code>mm.k</code> 差 2 倍。这就是第 2 节实验能成立的原因，
+      也让 INT8 build 成为一个天然的受控基线。</p>
+    <p>INT4 特有的三点：</p>
+    <ol>
+      <li><b>GM→L1 用 int8 字节视图做 Nd2Nz</b>（<code>dValue = K/2</code> 字节）。int4 沿 K 打包（偶数 k 在低 nibble），
+        字节视图保持了 K 方向连续性，32 字节的 C0 块正好就是 64 个 int4 元素——即 int4 的 C0。不需要特殊搬运。</li>
+      <li><b>L1→L0 必须以 <code>int4b_t</code> 类型调用 <code>LoadData</code></b>，让 AscendC 派发到
+        <code>load_cbuf_to_ca_s4</code> / <code>load_cbuf_to_cb_s4</code>（<code>dav_c220/kernel_operator_mm_impl.h</code>
+        有独立分支）。做法是在调用点对已经按字节偏移好的 tensor 做 <code>.ReinterpretCast&lt;int4b_t&gt;()</code>。
+        用 <code>int8_t</code> 类型会走通用 b8 指令，L0 布局不对。</li>
+      <li><b><code>Mmad</code> 同样 reinterpret 成 <code>int4b_t</code></b>，派发到 <code>mad_s4</code>；
+        <code>mm.k</code> 用<b>元素数</b>（512），不是字节数。</li>
+    </ol>
+    <p>流水结构（沿用 <code>NPU-OP/mid_group_gemm_fwd_lab/kernels/perchannel_int8_gemm.cpp</code>，已在 910B4 验证）：
+      L1 depth-2 ping-pong + L0 depth-2 ping-pong + 单 L0C 跨整个 K 累加 + 每输出 tile 一次 Fixpipe/一次 CrossCore 交接
+      + 跨 tile 预取。相对模板的改动是把“组内固定 4 slice 展开”改成<b>扁平的 slice 流水</b>，因此 K 只需要是
+      <code>INNER_K</code> 的倍数（int4: 512，int8: 256），而不是 1024/2048 的倍数——这样 512³ 这类 shape 才能测。</p>
+  </div>
+</section>
+
+<!-- ================= 正确性 ================= -->
+<section id="correctness">
+  <h2>8. 正确性</h2>
+  <div class="card">
+    <p>CPU 参考（int32 精确累加 → bf16）逐 shape 比对，<code>atol=2e-2, rtol=8e-2</code>，并加 <b>SNR ≥ 40 dB</b> 下限
+      （正确的 kernel 稳定在 80–117 dB；不加 SNR 时输出量级只有 ~1e-3 的 shape 会假 PASS）：</p>
+    <table>
+      <thead><tr><th style="text-align:left">shape</th><th>int4</th><th>int8</th></tr></thead>
+      <tbody>
+        <tr><td style="text-align:left">128×128×512 / 128×128×2048（单 tile）</td><td>PASS</td><td>PASS</td></tr>
+        <tr><td style="text-align:left">512×512×1024/2048（16 tile）</td><td>PASS</td><td>PASS</td></tr>
+        <tr><td style="text-align:left">1024×1024×2048（64 tile，20 核满载）</td><td>PASS</td><td>PASS</td></tr>
+        <tr><td style="text-align:left">2048³</td><td>PASS（snr 86.6 dB）</td><td>PASS（snr 86.6 dB）</td></tr>
+      </tbody>
+    </table>
+    <p>两个 build 在相同输入下 snr 完全一致，说明 INT4 路径与 INT8 路径算出的是同一个结果。
+      <b>race 压测：512×512×1024 与 1024×1024×2048 各连跑 30 次，30/30 PASS</b>（int4 与 int8 均是）。</p>
+    <div class="callout info"><b>第二轮修掉的两个 kernel bug</b>（都是 128×128 方 tile 掩盖的，参数化 TILE_M=16/64 后暴露）：
+      <br>① <code>kInnerStrideL1B = INNER_KB * TILE_M</code> 被同时用于 A 和 B 的 K-slice 步进——A 有 TILE_M 行、B 有 TILE_N 行，
+      两者 slice 步长只在 <code>TILE_M == TILE_N</code> 时相等。已拆成 <code>kSliceStrideA</code> / <code>kSliceStrideB</code>。
+      <br>② AIV 的 tile 循环缺 write-after-read 同步：下一个 tile 的 <code>Cast</code> 会覆写上一个 tile 的 MTE3 仍在读的
+      <code>ubBf16Out</code>；下一个 tile 的 workspace <code>DataCopy</code>(MTE2) 会覆写上一个 tile 的 <code>Cast</code>(V)
+      仍在读的 <code>ubInt32</code>。已补 <code>MTE3_V</code> / <code>V_MTE2</code> 屏障。TILE_M=16 时 cube 套圈 vector，
+      变成稳定复现的损坏（blockDim&gt;1 且 tile 数 &gt; blockDim 时必现，SNR 每次运行都不同）。
+      同一隐患也存在于 <code>mid_group_gemm_fwd_lab/perchannel_int8_gemm.cpp</code> 模板里。</div>
+  </div>
+</section>
+
+<!-- ================= 环境 ================= -->
+<section id="env">
+  <h2>9. 环境：device 0 已挂死（重要）</h2>
+  <div class="card">
+    <p>排查开始时，本文 kernel 和<b>作为参照的、已知正确的</b> <code>mid_group_gemm_fwd_lab/perchannel_int8_gemm</code>
+      在 device 0 上都会无限挂起（launch 后 <code>aclrtSynchronizeStream</code> 永不返回，<code>npu-smi</code> 显示
+      health OK、AICore 0%、无残留进程）。同一个二进制加上 <code>ASCEND_RT_VISIBLE_DEVICES=1</code> 立刻稳定 PASS。</p>
+    <p>这几乎可以肯定就是 <code>gemm_precision_lab/CHECKPOINT_2026-08-09.md</code> 里记录的“概率性算错 / 失败率在会话中漂移
+      / 偶尔真的挂起”的成因——<b>不是 <code>CrossCoreSetFlag</code>/<code>CrossCoreWaitFlag</code> 写法本身的问题</b>。
+      该 checkpoint 里“这套 MIX_AIC_1_2 + CrossCore 写法在高并发下会丢信号”的结论应当撤回：同样的写法在健康设备上
+      30/30 稳定。</p>
+    <div class="callout warn"><b>后续所有测试请显式指定健康设备；device 0 需要 <code>npu-smi</code> 复位（需要权限）。</b></div>
+  </div>
+</section>
+
+<!-- ================= 复现 ================= -->
+<section id="repro">
+  <h2>10. 复现</h2>
+  <div class="card">
+<pre><code>cd vllm/int4_cube_lab
+bash scripts/build.sh
+
+export ASCEND_RT_VISIBLE_DEVICES=1        # 不要用 device 0
+
+# 正确性
+./build/perchannel_int4_gemm_test --rows 1024 --cols 1024 --k 2048 --check
+# race 压测
+./build/perchannel_int4_gemm_test --rows 512 --cols 512 --k 1024 --stress 30
+# 吞吐扫描（--nosync = 批量入队后单次同步，剔除 host 往返）
+bash scripts/sweep.sh
+# 官方基线
+python3 bench/bench_official.py --out results/official.csv</code></pre>
+    <p>产物：<code>results/custom_kernels_nosync.csv</code>、<code>results/official.csv</code>、<code>results/byte_matched.csv</code>、
+      <code>results/qwen3_combined_cold.csv</code>。</p>
+    <h3>已知限制 / 遗留</h3>
+    <ul>
+      <li>M、N 必须是 128 的倍数；K 必须是 512(int4)/256(int8) 的倍数；<code>K/elemsPerByte</code> 必须 &lt; 65536
+        （<code>Nd2NzParams.srcDValue</code> 是 uint16）。</li>
+      <li>tile 固定 128×128；<code>TILE_N</code> 改成 256 会 deterministic 全错（推测 <code>mad_s4</code> 单次调用 N 方向上限是 128）。
+        进一步提速更值得做 <b>TILE_M=256</b>（L0A 预算够）或 L2 友好的 tile 遍历顺序。</li>
+      <li>只测了 MLP 两个投影，attention 的 QKV/O 没测；TP 分片形状（TP=2/4）没测；本地 QwQ-32B 的 intermediate 是 27648 而非
+        25600，若目标是 QwQ 需重跑，数字大约平移 8%。</li>
+      <li>本文 kernel 在 M=512/1024 还有约 1.4× 的调优空间（见读法 3）。</li>
+      <li>尚未包装成 <code>torch.ops.npu.*</code>（op-plugin INTEGRATION 路径），当前只是独立 Kernel Launch 基准。</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <p>数据来源：<code>results/*.csv</code>（<code>custom_kernels_nosync.csv</code> · <code>official.csv</code> ·
+    <code>byte_matched.csv</code> · <code>qwen3_combined_cold.csv</code>）与 <code>REPORT.md</code>，全部数字经原始 CSV 复核一致。
+    本文档为自包含 HTML，无外部依赖，可离线打开。</p>
+</footer>
+
+</main>
+
+<script>
+/* ================= 图表数据（与表格同源） ================= */
+const COLORS = {
+  bf16:   { name: 'BF16 torch.mm',           color: '#9ca3af', w: 2 },
+  i8off:  { name: 'INT8 npu_quant_matmul',   color: '#f59e0b', w: 2 },
+  i8ours: { name: 'INT8 本文 kernel',         color: '#3b82f6', w: 2 },
+  i4ours: { name: 'INT4 本文 kernel',         color: '#dc2626', w: 3.2 },
+  w4a16:  { name: 'W4A16 官方',               color: '#8b5cf6', w: 2, dash: '6 4' },
+};
+
+/* ---------- 通用折线图（SVG 生成） ---------- */
+function lineChart(elId, series, xLabels, opts) {
+  const W = 980, H = 380, padL = 74, padR = 24, padT = 34, padB = 48;
+  const logY = opts.logY || false;
+  const yLabel = opts.yLabel || '';
+  const xLabel = opts.xLabel || '';
+
+  let all = [];
+  series.forEach(s => all = all.concat(s.values));
+  let yMin = Math.min(...all), yMax = Math.max(...all);
+  if (logY) {
+    yMin = Math.pow(10, Math.floor(Math.log10(yMin)));
+    yMax = Math.pow(10, Math.ceil(Math.log10(yMax)));
+    if (yMin <= 0) yMin = 1;
+  } else {
+    yMin = 0; yMax = yMax * 1.12;
+  }
+
+  // ticks
+  let ticks;
+  if (logY) {
+    ticks = [];
+    for (let b = yMin; b <= yMax * 1.01; b *= 10) {
+      for (const m of [1, 2, 5]) {
+        const t = m * b;
+        if (t >= yMin && t <= yMax * 1.001) ticks.push(t);
+      }
+    }
+    // 若太密（如 2,5,10,20,50...）只保留 1/2/5 会过多 → 按数量裁剪
+    if (ticks.length > 8) {
+      ticks = ticks.filter((t, i) => {
+        const m = t / Math.pow(10, Math.floor(Math.log10(t)));
+        return m === 1 || m === 5;
+      });
+    }
+  } else {
+    const step = yMax / 5;
+    ticks = [];
+    for (let i = 0; i <= 5; i++) ticks.push(i * step);
+  }
+
+  const yAt = v => {
+    if (logY) {
+      const lmin = Math.log10(yMin), lmax = Math.log10(yMax);
+      const f = (Math.log10(v) - lmin) / (lmax - lmin);
+      return padT + (H - padT - padB) * (1 - f);
+    }
+    return padT + (H - padT - padB) * (1 - (v - yMin) / (yMax - yMin));
+  };
+  const xAt = i => padL + (W - padL - padR) * (xLabels.length === 1 ? 0.5 : i / (xLabels.length - 1));
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="inherit">`;
+  // grid + y labels
+  ticks.forEach(t => {
+    const y = yAt(t);
+    svg += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#e8ecf1" stroke-width="1"/>`;
+    let label = t;
+    if (t >= 10000) label = (t / 1000) + 'k';
+    svg += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" font-size="11.5" fill="#6b7280">${label}</text>`;
+  });
+  // x labels
+  xLabels.forEach((l, i) => {
+    svg += `<text x="${xAt(i)}" y="${H - padB + 20}" text-anchor="middle" font-size="11.5" fill="#6b7280">${l}</text>`;
+  });
+  // axis titles
+  svg += `<text x="${padL - 52}" y="${padT - 6}" font-size="12" fill="#374151" transform="rotate(-90 ${padL - 52} ${padT - 6})" text-anchor="middle">${yLabel}</text>`;
+  svg += `<text x="${(padL + W - padR) / 2}" y="${H - 10}" font-size="12" fill="#374151" text-anchor="middle">${xLabel}</text>`;
+
+  // series
+  series.forEach(s => {
+    const pts = s.values.map((v, i) => [xAt(i), yAt(v)]);
+    let d = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+    svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.w}" ${s.dash ? `stroke-dasharray="${s.dash}"` : ''} stroke-linejoin="round" stroke-linecap="round" opacity="0.9"/>`;
+    pts.forEach((p, i) => {
+      svg += `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${s.w >= 3 ? 4.5 : 3.2}" fill="${s.color}"/>`;
+      svg += `<title>${s.name} @ ${xLabels[i]}: ${s.values[i]}</title>`;
+    });
+  });
+  svg += '</svg>';
+
+  document.getElementById(elId).innerHTML = svg;
+  const legend = document.getElementById(elId + '-legend');
+  if (legend) {
+    legend.innerHTML = series.map(s =>
+      `<span style="margin-right:18px;white-space:nowrap"><span class="dot" style="background:${s.color}"></span>${s.name}</span>`
+    ).join('');
+  }
+}
+
+/* ---------- 分组柱状图 ---------- */
+function barChart(elId, groups, series, opts) {
+  const W = 980, H = 380, padL = 74, padR = 24, padT = 34, padB = 48;
+  const yLabel = opts.yLabel || '';
+  const xLabel = opts.xLabel || '';
+  let all = [];
+  groups.forEach(g => g.values.forEach(v => all.push(v)));
+  const yMax = Math.max(...all) * 1.15;
+  const step = yMax / 5;
+  const ticks = [];
+  for (let i = 0; i <= 5; i++) ticks.push(i * step);
+
+  const yAt = v => padT + (H - padT - padB) * (1 - v / yMax);
+  const plotW = W - padL - padR;
+  const slot = plotW / groups.length;
+  const bw = slot * 0.52 / series.length;
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="inherit">`;
+  ticks.forEach(t => {
+    const y = yAt(t);
+    svg += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#e8ecf1" stroke-width="1"/>`;
+    svg += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" font-size="11.5" fill="#6b7280">${Math.round(t)}</text>`;
+  });
+  groups.forEach((g, gi) => {
+    const cx = padL + slot * gi + slot / 2;
+    g.values.forEach((v, si) => {
+      const x = cx - (slot * 0.52) / 2 + si * bw;
+      const y = yAt(v);
+      svg += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(bw - 5).toFixed(1)}" height="${(H - padB - y).toFixed(1)}" rx="3" fill="${series[si].color}" opacity="0.9"><title>${series[si].name} @ ${g.label}: ${v} ${opts.unit || ''}</title></rect>`;
+    });
+    svg += `<text x="${cx}" y="${H - padB + 20}" text-anchor="middle" font-size="11.5" fill="#6b7280">${g.label}</text>`;
+  });
+  svg += `<text x="${padL - 52}" y="${padT - 6}" font-size="12" fill="#374151" transform="rotate(-90 ${padL - 52} ${padT - 6})" text-anchor="middle">${yLabel}</text>`;
+  svg += `<text x="${(padL + W - padR) / 2}" y="${H - 10}" font-size="12" fill="#374151" text-anchor="middle">${xLabel}</text>`;
+  svg += '</svg>';
+
+  document.getElementById(elId).innerHTML = svg;
+  const legend = document.getElementById(elId + '-legend');
+  if (legend) {
+    legend.innerHTML = series.map(s =>
+      `<span style="margin-right:18px;white-space:nowrap"><span class="dot" style="background:${s.color}"></span>${s.name}</span>`
+    ).join('');
+  }
+}
+
+/* ================= 图表 1：方阵吞吐 ================= */
+lineChart('chart-square', [
+  { name: COLORS.bf16.name,   color: COLORS.bf16.color,   w: 2, values: [10.33, 84.90, 198.77, 246.19, 219.07] },
+  { name: COLORS.i8off.name,  color: COLORS.i8off.color,  w: 2, values: [6.60, 52.81, 241.47, 380.55, 404.76] },
+  { name: COLORS.i8ours.name, color: COLORS.i8ours.color, w: 2, values: [20.32, 98.73, 292.89, 395.61, 389.78] },
+  { name: COLORS.i4ours.name, color: COLORS.i4ours.color, w: 3.2, values: [21.95, 118.57, 392.20, 685.12, 778.57] },
+], ['512', '1024', '2048', '4096', '8192'], { yLabel: 'TFLOPS', xLabel: 'M = N = K', logY: false });
+document.getElementById('chart-square').insertAdjacentHTML('afterend',
+  `<div class="legend">${Object.values(COLORS).map(s => `<span style="margin-right:18px;white-space:nowrap"><span class="dot" style="background:${s.color}"></span>${s.name}</span>`).join('')}</div>`);
+
+/* ================= 图表 2：字节配平 ================= */
+barChart('chart-byte', [
+  { label: '2048', values: [288.34, 574.25] },
+  { label: '4096', values: [388.87, 786.13] },
+  { label: '8192', values: [397.32, 787.68] },
+], [
+  { name: 'INT8 本文 kernel', color: '#3b82f6' },
+  { name: 'INT4 本文 kernel', color: '#dc2626' },
+], { yLabel: 'TFLOPS', xLabel: 'M = N（K 翻倍使字节相等）', unit: 'TFLOPS' });
+document.getElementById('chart-byte').insertAdjacentHTML('afterend',
+  `<div class="legend"><span style="margin-right:18px"><span class="dot" style="background:#3b82f6"></span>INT8 本文 kernel</span><span style="margin-right:18px"><span class="dot" style="background:#dc2626"></span>INT4 本文 kernel（K×2，字节相同）</span>算力比 1.99× / 2.02× / 1.98×</div>`);
+
+/* ================= 图表 3 & 4：Qwen3 MLP（log 延迟） ================= */
+const gateUp = {
+  bf16:   [438.8, 442.2, 506.4, 487.7, 522.3, 1544.6, 2677.3],
+  i8off:  [334.7, 332.0, 333.3, 240.0, 340.7, 825.5, 1573.2],
+  w4a16:  [729.1, 730.4, 734.7, 751.4, 790.6, 1176.8, 2501.3],
+  i8ours: [229.1, 231.7, 230.8, 263.1, 327.9, 1161.8, 2296.6],
+  i4ours: [119.4, 119.1, 119.2, 133.6, 161.0, 583.2, 1181.2],
+};
+const downProj = {
+  bf16:   [217.1, 216.8, 218.7, 236.2, 254.0, 756.1, 1430.0],
+  i8off:  [157.1, 155.3, 157.5, 158.8, 163.1, 447.6, 962.9],
+  w4a16:  [691.6, 691.2, 699.3, 708.4, 751.3, 947.9, 1641.5],
+  i8ours: [114.4, 114.4, 115.0, 132.8, 167.9, 549.7, 1068.5],
+  i4ours: [64.2, 64.1, 63.9, 73.6, 86.0, 216.5, 389.8],
+};
+const MLP_SERIES = [
+  { name: COLORS.bf16.name,   color: COLORS.bf16.color,   w: 2 },
+  { name: COLORS.i8off.name,  color: COLORS.i8off.color,  w: 2 },
+  { name: COLORS.w4a16.name,  color: COLORS.w4a16.color,  w: 2, dash: '6 4' },
+  { name: COLORS.i8ours.name, color: COLORS.i8ours.color, w: 2 },
+  { name: COLORS.i4ours.name, color: COLORS.i4ours.color, w: 3.2 },
+];
+const MLP_X = ['1', '4', '16', '64', '128', '512', '1024'];
+
+lineChart('chart-gateup', [
+  { ...MLP_SERIES[0], values: gateUp.bf16 },
+  { ...MLP_SERIES[1], values: gateUp.i8off },
+  { ...MLP_SERIES[2], values: gateUp.w4a16 },
+  { ...MLP_SERIES[3], values: gateUp.i8ours },
+  { ...MLP_SERIES[4], values: gateUp.i4ours },
+], MLP_X, { yLabel: '延迟 µs (log)', xLabel: 'M（batch / seq len）', logY: true });
+document.getElementById('chart-gateup').insertAdjacentHTML('afterend',
+  `<div class="legend">gate_up_proj N=51200 K=5120 · 对数刻度 · ${MLP_SERIES.map(s => `<span style="margin-right:18px;white-space:nowrap"><span class="dot" style="background:${s.color}"></span>${s.name}</span>`).join('')}</div>`);
+
+lineChart('chart-downproj', [
+  { ...MLP_SERIES[0], values: downProj.bf16 },
+  { ...MLP_SERIES[1], values: downProj.i8off },
+  { ...MLP_SERIES[2], values: downProj.w4a16 },
+  { ...MLP_SERIES[3], values: downProj.i8ours },
+  { ...MLP_SERIES[4], values: downProj.i4ours },
+], MLP_X, { yLabel: '延迟 µs (log)', xLabel: 'M（batch / seq len）', logY: true });
+document.getElementById('chart-downproj').insertAdjacentHTML('afterend',
+  `<div class="legend">down_proj N=5120 K=25600 · 对数刻度 · ${MLP_SERIES.map(s => `<span style="margin-right:18px;white-space:nowrap"><span class="dot" style="background:${s.color}"></span>${s.name}</span>`).join('')}</div>`);
+</script>
+
+</body>
+</html>

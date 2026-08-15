@@ -1,0 +1,39 @@
+{
+  "config": "w4a8-mg1024-asym",
+  "model": "models/QwQ-32B",
+  "gptq_dir": "",
+  "tasks": [
+    "cola",
+    "sst2",
+    "mrpc",
+    "qqp",
+    "mnli",
+    "qnli",
+    "rte",
+    "wnli"
+  ],
+  "limit": 500,
+  "num_fewshot": null,
+  "max_gen_toks": 1024,
+  "seconds": 4105.661082286853,
+  "results": {
+    "cola/sample_len": 500,
+    "cola/mcc,none": 0.2328073708342384,
+    "sst2/sample_len": 500,
+    "sst2/acc,none": 0.9,
+    "mrpc/sample_len": 408,
+    "mrpc/acc,none": 0.7818627450980392,
+    "mrpc/f1,none": 0.8543371522094927,
+    "qqp/sample_len": 500,
+    "qqp/acc,none": 0.708,
+    "qqp/f1,none": 0.690677966101695,
+    "mnli/sample_len": 500,
+    "mnli/acc,none": 0.57,
+    "qnli/sample_len": 500,
+    "qnli/acc,none": 0.516,
+    "rte/sample_len": 277,
+    "rte/acc,none": 0.740072202166065,
+    "wnli/sample_len": 71,
+    "wnli/acc,none": 0.8309859154929577
+  }
+}

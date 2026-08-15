@@ -1,0 +1,9 @@
+arm,layers,tp,graph,cudagraph_mode,batch,total_s,gen_tok,step_us,per_layer_us
+w8a8-native,4,1,aclgraph,FULL_DECODE_ONLY,1,0.4496,64,7025.37,1756.342
+w4a8-native,4,1,aclgraph,FULL_DECODE_ONLY,1,0.3960,64,6187.74,1546.935
+w8a8-native,4,1,aclgraph,FULL_DECODE_ONLY,1,0.4421,64,6907.11,1726.779
+w4a8-native,4,1,aclgraph,FULL_DECODE_ONLY,1,0.3793,64,5926.32,1481.580
+w8a8-native,16,1,aclgraph,FULL_DECODE_ONLY,1,1.0664,64,16662.24,1041.390
+w4a8-native,16,1,aclgraph,FULL_DECODE_ONLY,1,0.7225,64,11289.01,705.563
+bf16,4,1,aclgraph,FULL_DECODE_ONLY,1,0.5060,64,7906.62,1976.655
+bf16,16,1,aclgraph,FULL_DECODE_ONLY,1,1.3310,64,20797.42,1299.839

@@ -1,0 +1,9 @@
+# P5 D7: flush-count slope.  qkv (N=7168,K=5120) at M=512, TILE_M=128, SYM builds
+# (m128_g{256,512,1024}), --cold --profile --nosync, median-of-3.
+# The L1 slab is 512 B/row for all three (kTargetGroupKB=512, INNER_KB=128), so
+# the GM->L1 stream is IDENTICAL and the only variable is the number of flushes.
+# flush bytes per group, whole GEMM = M*N*2planes*4B = 512*7168*8 = 29.36 MB.
+gk,G,us,marginal_us_per_group,marginal_TBps
+1024,5,148.41,,
+512,10,220.43,14.40,2.04
+256,20,412.26,19.18,1.53

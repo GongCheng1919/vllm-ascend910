@@ -1,0 +1,11 @@
+kernel,M,N,K,avg_us,tflops
+torch.mm_bf16,512,512,512,25.99,10.33
+torch.mm_bf16,1024,1024,1024,25.29,84.90
+torch.mm_bf16,2048,2048,2048,86.43,198.77
+torch.mm_bf16,4096,4096,4096,558.27,246.19
+torch.mm_bf16,8192,8192,8192,5018.91,219.07
+npu_quant_matmul_int8,512,512,512,40.64,6.60
+npu_quant_matmul_int8,1024,1024,1024,40.66,52.81
+npu_quant_matmul_int8,2048,2048,2048,71.15,241.47
+npu_quant_matmul_int8,4096,4096,4096,361.16,380.55
+npu_quant_matmul_int8,8192,8192,8192,2716.43,404.76

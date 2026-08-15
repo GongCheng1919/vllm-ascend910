@@ -1,0 +1,30 @@
+# P5 D10 (2026-08-15).  SPARE kernel: narrow the workspace flush to 2 B/element.
+#
+# int32 -> bf16 (QS322BF16_PRE) is NOT reachable on V220: the enum exists in the
+# compiler ISA header but AscendC's V220 Fixpipe dispatch implements only
+# NoQuant / F322F16 / F322BF16 / DEQF16 / VDEQF16 / QF322B8 / REQ8 / VREQ8, and
+# every F322* mode needs an fp32 L0C, which an integer MAD cannot produce.
+# DEQF16 (int32 -> fp16, scalar deq scale) is the only narrowing mode available
+# for an int32 accumulator -- and it is the better one anyway: fp16 keeps 10
+# mantissa bits to bf16's 8.  Pre-scale 1/16 buys range headroom (|S| <= 65536
+# vs fp16's 65504); power of two, so the AIV undoes it exactly.
+#
+# ACCURACY (vs the harness CPU reference, --check): PASS everywhere.
+#   qkv  M=512 : mismatches=0  max_abs=1.953e-03  snr_db=74.28
+#   down M=512 : mismatches=0  max_abs=3.906e-03  snr_db=71.98   (G=27, worst case)
+#   qkv  M=1024: mismatches=0  max_abs=1.953e-03  snr_db=74.48
+#   max_abs is one ulp of the OUTPUT bf16 -- the added noise lands under the
+#   output's own quantisation.  NOT bit-identical to fakequant_lab, so it still
+#   breaks the P3 contract and stays off by default.
+#
+# PERFORMANCE: halving the flush bytes made it SLOWER on every shape.
+# fp16ws has BAND_N_CFG=1, so compare it against the `band` column.
+proj,M,N,K,full_us,band_us,fp16ws_us,fp16_vs_band,nofix_us,pc_us,w8a8_us
+qkv,512,7168,5120,150.78,150.40,159.04,+5.7%,101.68,106.15,121.10
+qkv,1024,7168,5120,275.84,275.13,292.31,+6.2%,182.58,187.17,207.98
+o,512,5120,5120,107.49,108.09,112.33,+3.9%,75.11,78.71,91.03
+o,1024,5120,5120,197.52,197.98,208.06,+5.1%,132.96,136.87,157.07
+gate_up,512,55296,5120,1045.56,1019.22,1077.93,+5.8%,705.70,791.53,1250.02
+gate_up,1024,55296,5120,2201.29,2096.82,2128.98,+1.5%,1379.92,1566.98,2475.00
+down,512,5120,27648,512.44,500.34,521.62,+4.3%,365.88,372.23,611.33
+down,1024,5120,27648,999.31,977.72,1029.20,+5.3%,692.89,710.31,

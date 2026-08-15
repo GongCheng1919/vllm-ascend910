@@ -1,0 +1,30 @@
+从README加载上下文，然后开始讨论。
+我们之前的测试证明了当前版本的vllm在910B4和当前环境下，是原生支持W8A8和W4A8支持的，但是从计算性能上来看，W8A8和BF16没有显著差距（参见results/20260729_qwq32b_4npu_v1和vllm/results/20260730_qwq32b_w4a8_random_noprefix），而W4A8和BF16相比甚至更差了，所以我有点怀疑W8A8和W4A8到底是用了int8Cube在计算还是cast到BF16用的BF16cube在算的，因为这个决定了我们未来到底用什么技术方案去优化W8A8和W4A8进行吞吐优化。
+
+我们测试vllm进行Qwen3-32B的BF16，W8A8，W4A8，发现了一个不得了的事情，我们居然发现910B4似乎是原生支持INT4Cube指令的。
+为了验证910B4是否支持INT4Cube以及器吞吐是否也是INT8Cube的2倍，我们现在需要手写一个CANN的INT4GEMM kernel，并且和INT8 GEMM以及BF16 GEMM做对比。
+我们只需要实现perchannel_int4_gemm，具体实现可以参考/home/gongcheng/PureInt8LLMPretraining/NPU-OP/mid_group_gemm_fwd_lab/kernels/perchannel_int8_gemm.cpp中的实现。
+注意我们在本目录可能已经实现了几个gemmkernel，但是我建议不要复用现有的而是实现新的kernel，因为现有的实现理解有点偏差，很多bug并且很难修复，可能可以参考，但是重写可能比修复bug简单。
+我最终想要的，就是在512^3-8192^3的计算规模，不同GEMM kernel的吞吐，其中INT8和BF16可以直接用官方实现。
+
+我已经在/home/gongcheng/PureInt8LLMPretraining/vllm/int4_cube_lab文件价成功利用claude
+ opus完成了INT4GEMM的吞吐对比测试，效果很好，你看看结果帮我写个html的报告。
+ 
+
+ 从MGCKPT继续，我们测试了W4A8-pc和W4A8-mg的性能差异，看起来是有点大的，我在想原因出在哪里，是g1024情况下，Cube延迟还不能覆盖GM中转通信延迟，以及AIV的dequant延迟吗？否则其延迟应该接近W4A8-pc才对，还是使用GM中转影响了本来的W4的带宽优势（增加了内存访问）？而pc实现本质上也会用到AIV后处理，因为fixpipe下发只能处理标量或者向量的scale dequant，但是没法处理pergroup x per-token形式的反量化，其需要对计算结果哈达玛乘以一个scale矩阵。我觉得应该是这样。
+
+  从MGCKPT继续，我们当前完成了P0，探针测试了W4A8-pc和W4A8-mg相比于W8A8-pc存在显著的性能优势，尤其是小M情景下和真实QwQ032B模型计算规模下， 具体的测试结果可以参见int4_cube_lab/results，最新的测试结果是midgroup_cost_v4.csv，报告文件在int4_cube_lab/REPORT_W4A8.md。我需要你做：
+1、检查REPORT_W4A8中是否已经报告了最新的包括v4的结果？如果没有需要补上（注意不是替换原来的，而是补上最新的，这样可以直观看出更新结果）
+2、根据REPORT_W4A8中的结果生成最新的html报告
+
+从MGCKPT继续，我们当前完成了P0，探针测试了W4A8-pc和W4A8-mg相比于W8A8-pc存在显著的性能优势，尤其是小M情景下和真实QwQ032B模型计算规模下， 具体的测试结果可以参见int4_cube_lab/results，最新的测试结果是midgroup_cost_v4.csv，报告文件在int4_cube_lab/REPORT_W4A8.md。
+P0的探针揭示了应用W4A8-mg相比于W8A8-pc和W8A8-mg（这个在nitro中有现成实现）都有显著的性能收益，
+接下来是P1阶段，我们需要用fake quant来验证W4A8-mg在模型性能退化方面是否可行.
+
+从MGCKPT继续，我们推进到了P2，当前测试完成了GPTQ的结果，结果并不好，可能是算法本身的原因，不过我觉得可以暂时跳过，因为当前的W4A9-mg1024的效果看起来是已经足够用的，倒是GLUE和LM_eval
+
+从MGCKPT继续，我们P2做了一半，但是我发现NPU不是很适合做quant，我觉得应该并行着做量化和加速，不应该由量化P2卡住我们，所以我认为可以把P2标记为待完成，然后推进P3，P3就以W4A8-mg1024-asym作为基准，因为我们优化肯定也是优化非对称的量化算法。如何？
+
+从MGCKPT/P4_E2E.md继续，现在这个性能对比BF16居然只有1.3x，而我们的目标是超越W8A8，有点太离谱了哈，我们现在是否已经做了算子融合和自定一transformer层？还是仅仅做了算子替换？
+
+从MGCKPT/P5_KERNEL_OPT.md 继续，我们接下来干嘛？

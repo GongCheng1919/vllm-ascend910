@@ -1,0 +1,39 @@
+{
+  "config": "bf16",
+  "model": "models/QwQ-32B",
+  "gptq_dir": "",
+  "tasks": [
+    "cola",
+    "sst2",
+    "mrpc",
+    "qqp",
+    "mnli",
+    "qnli",
+    "rte",
+    "wnli"
+  ],
+  "limit": 500,
+  "num_fewshot": null,
+  "max_gen_toks": 1024,
+  "seconds": 1620.8705734838732,
+  "results": {
+    "cola/sample_len": 500,
+    "cola/mcc,none": 0.35640899018217886,
+    "sst2/sample_len": 500,
+    "sst2/acc,none": 0.908,
+    "mrpc/sample_len": 408,
+    "mrpc/acc,none": 0.7843137254901961,
+    "mrpc/f1,none": 0.8585209003215434,
+    "qqp/sample_len": 500,
+    "qqp/acc,none": 0.83,
+    "qqp/f1,none": 0.7901234567901234,
+    "mnli/sample_len": 500,
+    "mnli/acc,none": 0.594,
+    "qnli/sample_len": 500,
+    "qnli/acc,none": 0.544,
+    "rte/sample_len": 277,
+    "rte/acc,none": 0.776173285198556,
+    "wnli/sample_len": 71,
+    "wnli/acc,none": 0.8591549295774648
+  }
+}

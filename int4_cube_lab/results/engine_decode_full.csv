@@ -1,0 +1,5 @@
+arm,layers,tp,graph,cudagraph_mode,batch,total_s,gen_tok,step_us,per_layer_us
+bf16,4,1,aclgraph,FULL_DECODE_ONLY,1,0.5153,64,8051.17,2012.792
+w4a8,4,1,aclgraph,FULL_DECODE_ONLY,1,0.3605,64,5632.51,1408.128
+bf16,16,1,aclgraph,FULL_DECODE_ONLY,1,1.3498,64,21090.79,1318.174
+w4a8,16,1,aclgraph,FULL_DECODE_ONLY,1,0.6568,64,10261.80,641.363

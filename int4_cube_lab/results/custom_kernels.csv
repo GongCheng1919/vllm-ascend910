@@ -1,0 +1,11 @@
+kernel,M,N,K,avg_us,tflops
+perchannel_int4_gemm,512,512,512,42.57,6.31
+perchannel_int4_gemm,1024,1024,1024,51.45,41.74
+perchannel_int4_gemm,2048,2048,2048,76.01,226.01
+perchannel_int4_gemm,4096,4096,4096,219.20,627.00
+perchannel_int4_gemm,8192,8192,8192,1456.46,754.92
+perchannel_int8_gemm,512,512,512,38.62,6.95
+perchannel_int8_gemm,1024,1024,1024,43.88,48.94
+perchannel_int8_gemm,2048,2048,2048,82.44,208.40
+perchannel_int8_gemm,4096,4096,4096,374.28,367.21
+perchannel_int8_gemm,8192,8192,8192,2773.35,396.46

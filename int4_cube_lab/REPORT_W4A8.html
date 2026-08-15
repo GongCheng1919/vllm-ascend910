@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>W4A8 per-channel GEMM：MSD 分解实现 vs W8A8 吞吐对比</title>
+<style>
+  :root {
+    --bg: #f5f7fa;
+    --card: #ffffff;
+    --ink: #1f2937;
+    --muted: #6b7280;
+    --line: #e5e7eb;
+    --accent: #0f4c81;
+    --w4a8: #dc2626;
+    --w8a8: #3b82f6;
+    --w4a4: #8b5cf6;
+    --mg1024: #f59e0b;
+    --mg512: #0891b2;
+    --mg256: #9ca3af;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.65;
+  }
+  header.hero {
+    background: linear-gradient(135deg, #0b2e4f 0%, #0f4c81 55%, #16679c 100%);
+    color: #fff;
+    padding: 48px 24px 40px;
+    text-align: center;
+  }
+  header.hero h1 { margin: 0 0 10px; font-size: 28px; letter-spacing: .5px; }
+  header.hero .sub { opacity: .85; font-size: 15px; margin-bottom: 26px; }
+  .kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 14px;
+    max-width: 1080px;
+    margin: 0 auto;
+  }
+  .kpi {
+    background: rgba(255,255,255,.10);
+    border: 1px solid rgba(255,255,255,.18);
+    border-radius: 12px;
+    padding: 14px 16px;
+    backdrop-filter: blur(4px);
+  }
+  .kpi .v { font-size: 26px; font-weight: 700; color: #ffd166; }
+  .kpi .k { font-size: 12.5px; opacity: .9; margin-top: 4px; }
+  nav.toc {
+    position: sticky; top: 0; z-index: 50;
+    background: #fff; border-bottom: 1px solid var(--line);
+    padding: 10px 16px; text-align: center;
+    box-shadow: 0 1px 4px rgba(0,0,0,.05);
+  }
+  nav.toc a {
+    display: inline-block; margin: 2px 8px; padding: 4px 10px;
+    color: var(--accent); text-decoration: none; font-size: 13.5px;
+    border-radius: 999px;
+  }
+  nav.toc a:hover { background: #e8f0f8; }
+  main { max-width: 1080px; margin: 0 auto; padding: 30px 20px 60px; }
+  section { margin-bottom: 44px; }
+  h2 {
+    font-size: 21px; margin: 0 0 6px; padding-left: 12px;
+    border-left: 4px solid var(--accent); color: #0b2e4f;
+  }
+  h3 { font-size: 16.5px; margin: 26px 0 10px; color: #123c63; }
+  p { margin: 8px 0; }
+  .lead { font-size: 15.5px; }
+  strong.hl { color: var(--w4a8); }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 22px 24px; margin-top: 18px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.04);
+  }
+  table {
+    width: 100%; border-collapse: collapse; margin: 14px 0;
+    font-size: 13.5px;
+  }
+  th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--line); }
+  th { background: #f0f4f8; color: #33475b; font-weight: 600; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  tbody tr:hover { background: #fafcff; }
+  td.hl { color: var(--w4a8); font-weight: 700; }
+  td.best { color: var(--w4a8); font-weight: 700; background: #fef2f2; }
+  .foot { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+  .callout { border-radius: 10px; padding: 12px 16px; margin: 14px 0; font-size: 14px; }
+  .callout.warn { background: #fff7ed; border: 1px solid #fed7aa; color: #7c2d12; }
+  .callout.info { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a5f; }
+  .callout.ok   { background: #f0fdf4; border: 1px solid #bbf7d0; color: #14532d; }
+  .callout b { font-weight: 700; }
+  code, pre {
+    font-family: "SF Mono", "JetBrains Mono", Consolas, monospace;
+    font-size: 12.5px;
+  }
+  code { background: #eef2f6; padding: 1px 5px; border-radius: 4px; }
+  pre {
+    background: #0f172a; color: #e2e8f0; padding: 14px 16px;
+    border-radius: 10px; overflow-x: auto; line-height: 1.55;
+  }
+  pre code { background: none; color: inherit; padding: 0; }
+  .chart { width: 100%; height: auto; margin: 10px 0 4px; }
+  .legend { font-size: 12.5px; color: var(--muted); margin: 4px 0 10px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+  footer { border-top: 1px solid var(--line); margin-top: 30px; padding-top: 18px; color: var(--muted); font-size: 13px; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+  .tag { display:inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; margin-left: 6px; }
+  .tag.red { background:#fee2e2; color:#991b1b; }
+  .tag.blue { background:#dbeafe; color:#1e40af; }
+  .tag.gray { background:#e5e7eb; color:#374151; }
+  .tag.green { background:#dcfce7; color:#14532d; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <h1>W4A8 per-channel GEMM<br>MSD 分解实现 vs W8A8 吞吐对比</h1>
+  <div class="sub">日期：2026-08-10 · 追加：2026-08-11 · 环境：Ascend 910B4 + CANN 8.5.0 + torch_npu 2.7.1 · Lab：<code style="color:#ffd166">vllm/int4_cube_lab</code> · 设备：<b>device 1</b>（device 0 已挂死）</div>
+  <div class="kpis">
+    <div class="kpi"><div class="v">1.88×</div><div class="k">decode 收益：gate_up M=1，W4A8-pc vs W8A8（v4 最终数据）</div></div>
+    <div class="kpi"><div class="v">1.28–1.88×</div><div class="k">小 M（1/16）四个 Linear（attention qkv/o + MLP）对 W8A8 的加速区间</div></div>
+    <div class="kpi"><div class="v">5–47%</div><div class="k">mid-group gk=1024 相对 per-channel 的性能税（M 越大越贵，大 M 连 W8A8 都不如）</div></div>
+    <div class="kpi"><div class="v">5.9×</div><div class="k">vs 官方 W4A16 路径（vLLM 今天的 W4 路径，decode 档，正文 §5）</div></div>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#summary">一句话结论</a>
+  <a href="#msd">MSD 分解</a>
+  <a href="#correctness">正确性</a>
+  <a href="#qwen3">Qwen3 MLP 吞吐</a>
+  <a href="#square">方阵</a>
+  <a href="#midgroup">mid-group 代价（追加）</a>
+  <a href="#reading">读法</a>
+  <a href="#repro">复现</a>
+  <a href="#limits">已知限制</a>
+</nav>
+
+<main>
+
+<!-- ================= 一句话结论 ================= -->
+<section id="summary">
+  <h2>结论（一句话）</h2>
+  <div class="card">
+    <p class="lead"><b>W4A8 不但达到了 W8A8，还全面超过它。</b></p>
+    <p>Qwen3-32B 的 MLP 形状上，M=1..16（decode）快 <strong class="hl">1.65–1.88×</strong>，M=1024（prefill）
+      快 <strong class="hl">1.57–1.62×</strong>；且在 M ≤ 16 时只比纯 W4A4 慢 3–8%。这是在同一套流水、
+      同一份 host harness、同样 tile 几何下的对照测试。</p>
+    <div class="callout info"><b>2026-08-11 追加（第三轮）：</b>换成 <b>QwQ-32B 的四个 Linear</b>（补上 attention 的
+      qkv/o），并新增 <b>mid-group（w4a8_mg）</b> 变体（GK=1024/512/256）实测其代价——结果见文末
+      <a href="#midgroup" style="color:var(--accent)">「mid-group 的代价」</a>：per-channel 仍是 910B4 上 W4A8 的最优格式，
+      mid-group 在所有 GK 下都更慢（gk=1024 小 M 慢 5–13%，大 M 慢 37–47% 且连 W8A8 都不如）。</div>
+  </div>
+</section>
+
+<!-- ================= MSD 分解 ================= -->
+<section id="msd">
+  <h2>1. 为什么 W4A8 必须做 MSD 分解</h2>
+  <div class="card">
+    <p><code>kernel_operator_mm_impl.h:317</code> 的 <code>MmadCal</code> 只接受两种整型组合：</p>
+<pre><code>Tuple&lt;int32_t, int8_t,  int8_t&gt;  -&gt; mad
+Tuple&lt;int32_t, int4b_t, int4b_t&gt;  -&gt; mad_s4</code></pre>
+    <p><b>cube 没有 s8×s4 混合位宽指令。</b>所以"A 8bit、W 4bit"只有两条路：</p>
+    <ul>
+      <li>把 W 升到 int8 → 权重就不再是 4bit，访存收益归零，纯亏；</li>
+      <li>把 A 拆成两个 int4 平面走 <code>mad_s4</code>（MSD 分解）。</li>
+    </ul>
+    <p>本文走第二条。REPORT.md 末尾对 W4A8 的分析预测"两项分解 = 算力与 W8A8 打平、权重访存减半"，
+      本文把它实现出来并实测——<b>结论比预测更好</b>（见 §3/§4）。</p>
+
+    <h3>精确分解（覆盖全 int8 范围，不需要 clamp）</h3>
+    <p>朴素的对称二项分解 <code>a = 16h + l</code>（h、l ∈ [-8,7]）值域只有 [-136,119]，表示不了 a=120..127，
+      必须把量化器范围砍掉 0.09 bit。本文用带偏置的形式，<b>对全部 256 个 int8 值都精确</b>：</p>
+<pre><code>a = 16*h + l + 8,   h = a &gt;&gt; 4        ∈ [-8,7]   （int8 的高 nibble，即有符号 int4）
+                    l = (a &amp; 15) ^ 8  ∈ [-8,7]   （低 nibble XOR 8，即 v-8 的 int4 编码）</code></pre>
+    <p>代回 GEMM：</p>
+<pre><code>C[m,n] = Σ_k a·w = 16·Σ_k h·w  +  Σ_k l·w  +  8·Σ_k W[n,k]
+                                              └────┬────┘
+                                        与 m 无关的 per-channel 常数</code></pre>
+    <p>末项由 host 预先算好的 <code>w_ksum[N]</code>（int32）提供——这是<b>权重侧的一次性预处理</b>，
+      和 w_scale 同级别，推理时零成本。</p>
+    <p>两个 A 平面各 K/2 字节，合计 K 字节，<b>与 int8 的 A 完全一样大</b>；W 是 K/2 字节，<b>是 int8 的一半</b>。
+      两条 <code>mad_s4</code>（2× 速率）耗时 = 一条 <code>mad</code>。所以理论上：cube 时间打平，访存全面减少。</p>
+
+    <h3>实现：stacked-A（一条 Mmad、一个 L0C、一次 Fixpipe）</h3>
+    <p>没有用"两条 Mmad 打进两个累加器"，而是把 h 平面和 l 平面<b>沿 M 方向叠</b>成一个
+      <code>2*TILE_M</code> 的 cube tile，共享同一个 B：</p>
+<pre><code>L1 A tile (NZ, dstNzC0Stride = 2*TILE_M)
+   rows [0, TILE_M)        &lt;- a_hi   （Nd2Nz 第一次调用）
+   rows [TILE_M, 2*TILE_M) &lt;- a_lo   （第二次调用，dst 偏移 TILE_M*32 字节）</code></pre>
+    <p>于是 AIC 侧的每一个描述符都是 W4A4 kernel 把 <code>TILE_M</code> 换成 <code>TILE_MC = 2*TILE_M</code> 的结果，
+      指令结构一模一样。AIV 拿到 workspace 后做</p>
+<pre><code>c = 16*C[0:TILE_M] + C[TILE_M:2*TILE_M]        （int32 内精确相加）
+y = (c + 8*w_ksum[n]) * w_scale[n] * a_scale[m]  （fp32 → bf16）</code></pre>
+    <p><code>16*C_hi</code> 用 int32 <code>Muls</code>+<code>Add</code> 完成再 Cast，避免 fp32 在 2^24 以上丢低位。</p>
+
+    <h3>片上预算（这是 TILE_M 上限的来源）</h3>
+    <p>A 侧 cube 行数翻倍，L0A 就要翻倍。910B4：L1 512 KB、L0A/L0B 各 64 KB、L0C 128 KB。</p>
+    <table>
+      <thead><tr><th>TILE_M</th><th>cube tile</th><th>INNER_KB</th><th>L0A(×2)</th><th>L0C</th><th>L1</th></tr></thead>
+      <tbody>
+        <tr><td>16</td><td>32×128</td><td>256</td><td>16 KB</td><td>16 KB</td><td>320 KB</td></tr>
+        <tr><td>32</td><td>64×128</td><td>256</td><td>32 KB</td><td>32 KB</td><td>384 KB</td></tr>
+        <tr><td>64</td><td>128×128</td><td>256</td><td><b>64 KB</b></td><td>64 KB</td><td><b>512 KB</b></td></tr>
+        <tr><td>128</td><td>256×128</td><td>128</td><td><b>64 KB</b></td><td><b>128 KB</b></td><td>384 KB</td></tr>
+      </tbody>
+    </table>
+    <p>TILE_M=128 必须把 L0 slice 深度砍半（INNER_KB 256→128 字节）才放得下 depth-2 ping-pong；对应 K 的对齐要求从
+      512 变成 256 元素。TILE_M=128 是硬上限——再大 L0C 就爆了。（顺带确认了 910B4 的 L0C 确实是 128 KB：
+      256×128 的 int32 tile 跑通了。）</p>
+  </div>
+</section>
+
+<!-- ================= 正确性 ================= -->
+<section id="correctness">
+  <h2>2. 正确性</h2>
+  <div class="card">
+    <p>CPU 参考是<b>普通的 int8×int4 GEMM</b>（int32 精确累加 → bf16）：分解、cube 路径、<code>+8·ksum</code> 修正三者
+      只要有一个错，结果就对不上。A <b>按全 int8 范围 [-128,127] 生成</b>，W 按 [-8,7]。判据
+      <code>atol=2e-2, rtol=8e-2</code> 且 <b>SNR ≥ 40 dB</b>。</p>
+    <table>
+      <thead><tr><th style="text-align:left">shape</th><th>build</th><th style="text-align:left">结果</th></tr></thead>
+      <tbody>
+        <tr><td style="text-align:left">128×128×512（单 tile）</td><td>TILE_M=128</td><td style="text-align:left">PASS, snr 95.3 dB</td></tr>
+        <tr><td style="text-align:left">128×256×1024</td><td>TILE_M=128</td><td style="text-align:left">PASS, snr 118.3 dB</td></tr>
+        <tr><td style="text-align:left">512×512×2048</td><td>TILE_M=128</td><td style="text-align:left">PASS, snr 118.2 dB</td></tr>
+        <tr><td style="text-align:left">1024×1024×2048（64 tile，20 核满载）</td><td>TILE_M=128</td><td style="text-align:left">PASS, snr 92.3 dB</td></tr>
+        <tr><td style="text-align:left">64×512×1024 / 256×512×2048</td><td>TILE_M=64</td><td style="text-align:left">PASS, snr 95.6 / 115.2 dB</td></tr>
+        <tr><td style="text-align:left">32×512×1024</td><td>TILE_M=32</td><td style="text-align:left">PASS, snr 92.7 dB</td></tr>
+        <tr><td style="text-align:left">16×512×1024</td><td>TILE_M=16</td><td style="text-align:left">PASS, snr 138.0 dB</td></tr>
+        <tr><td style="text-align:left">1×512×1024（padding 到 16）</td><td>TILE_M=16</td><td style="text-align:left">PASS, 逐位相同</td></tr>
+      </tbody>
+    </table>
+    <p><b>race 压测</b>（tile 数 &gt; blockDim 才会暴露 AIC/AIV 交接问题）：</p>
+    <table>
+      <thead><tr><th style="text-align:left">shape</th><th>build</th><th style="text-align:left">结果</th></tr></thead>
+      <tbody>
+        <tr><td style="text-align:left">512×512×1024</td><td>TILE_M=128</td><td style="text-align:left">30/30 PASS</td></tr>
+        <tr><td style="text-align:left">1024×1024×2048</td><td>TILE_M=128</td><td style="text-align:left">20/20 PASS</td></tr>
+        <tr><td style="text-align:left">16×2048×5120（128 tile / 20 核）</td><td>TILE_M=16</td><td style="text-align:left">30/30 PASS</td></tr>
+        <tr><td style="text-align:left">64×2048×5120</td><td>TILE_M=64</td><td style="text-align:left">30/30 PASS</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ================= Qwen3 MLP ================= -->
+<section id="qwen3">
+  <h2>3. 吞吐：Qwen3-32B MLP 形状（cold，延迟 µs，越低越好）</h2>
+  <div class="card">
+    <p>维度取 Qwen3-32B（hidden=5120, intermediate=25600, TP=1）。三个 kernel 结构完全相同，只有量化格式不同。
+      <b>cold</b> = 轮换 ≥1 GiB 的权重副本冲掉 168 MiB 的 L2，避免 benchmark 循环把权重一直留在 L2 里
+      （详见 REPORT.md「追加」一节）。每格取 3 次的中位数。</p>
+
+    <h3>gate_up_proj（N=51200, K=5120）</h3>
+    <table id="tbl-gateup">
+      <thead><tr>
+        <th>M</th><th>W8A8</th><th><b style="color:var(--w4a8)">W4A8</b></th><th>W4A4</th>
+        <th><b style="color:var(--w4a8)">W4A8 / W8A8</b></th><th>W4A4 / W4A8</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>1</td><td>229.9</td><td class="best">123.7</td><td>119.9</td><td><b>1.86×</b></td><td>1.03×</td></tr>
+        <tr><td>4</td><td>231.4</td><td class="best">123.3</td><td>119.2</td><td><b>1.88×</b></td><td>1.03×</td></tr>
+        <tr><td>16</td><td>229.7</td><td class="best">122.9</td><td>119.4</td><td><b>1.87×</b></td><td>1.03×</td></tr>
+        <tr><td>64</td><td>264.1</td><td class="best">153.4</td><td>133.7</td><td><b>1.72×</b></td><td>1.15×</td></tr>
+        <tr><td>128</td><td>328.0</td><td class="best">255.6</td><td>160.7</td><td><b>1.28×</b></td><td>1.59×</td></tr>
+        <tr><td>512</td><td>1156.9</td><td class="best">732.1</td><td>580.5</td><td><b>1.58×</b></td><td>1.26×</td></tr>
+        <tr><td>1024</td><td>2284.8</td><td class="best">1451.2</td><td>1181.8</td><td><b>1.57×</b></td><td>1.23×</td></tr>
+      </tbody>
+    </table>
+    <div class="chart" id="chart-gateup"></div>
+    <div class="legend" id="chart-gateup-legend"></div>
+
+    <h3>down_proj（N=5120, K=25600）</h3>
+    <table id="tbl-downproj">
+      <thead><tr>
+        <th>M</th><th>W8A8</th><th><b style="color:var(--w4a8)">W4A8</b></th><th>W4A4</th>
+        <th><b style="color:var(--w4a8)">W4A8 / W8A8</b></th><th>W4A4 / W4A8</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>1</td><td>115.3</td><td class="best">68.5</td><td>64.4</td><td><b>1.68×</b></td><td>1.06×</td></tr>
+        <tr><td>4</td><td>114.6</td><td class="best">69.4</td><td>64.1</td><td><b>1.65×</b></td><td>1.08×</td></tr>
+        <tr><td>16</td><td>115.5</td><td class="best">69.1</td><td>64.7</td><td><b>1.67×</b></td><td>1.07×</td></tr>
+        <tr><td>64</td><td>133.0</td><td class="best">91.8</td><td>73.6</td><td><b>1.45×</b></td><td>1.25×</td></tr>
+        <tr><td>128</td><td>167.6</td><td class="best">117.5</td><td>86.6</td><td><b>1.43×</b></td><td>1.36×</td></tr>
+        <tr><td>512</td><td>551.0</td><td class="best">341.8</td><td>214.5</td><td><b>1.61×</b></td><td>1.59×</td></tr>
+        <tr><td>1024</td><td>1058.9</td><td class="best">653.1</td><td>394.5</td><td><b>1.62×</b></td><td>1.66×</td></tr>
+      </tbody>
+    </table>
+    <div class="chart" id="chart-downproj"></div>
+    <div class="legend" id="chart-downproj-legend"></div>
+
+    <p class="foot">M ≤ 16 各档都用 TILE_M=16 build，M=64 用 TILE_M=64，M ≥ 128 用 TILE_M=128；三种格式用同一套选择规则。
+      M=128 那一档单独核对过：TILE_M=128 build 对 W8A8（327 vs 517 µs）和 W4A8（256 vs 285 µs）都是更快的那个，
+      所以表里没有因为 build 选错而低估任何一方。</p>
+  </div>
+</section>
+
+<!-- ================= 方阵 ================= -->
+<section id="square">
+  <h2>4. 方阵（hot，M=N=K）——cube 瓶颈端</h2>
+  <div class="card">
+    <table>
+      <thead><tr>
+        <th>M=N=K</th><th>W8A8 µs</th><th><b style="color:var(--w4a8)">W4A8 µs</b></th><th>W4A4 µs</th>
+        <th>W4A8/W8A8</th><th>W4A8 TFLOPS</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>512</td><td>12.74</td><td>14.42</td><td>12.32</td><td>0.88×</td><td>18.6</td></tr>
+        <tr><td>1024</td><td>20.90</td><td>24.01</td><td>18.29</td><td>0.87×</td><td>89.4</td></tr>
+        <tr><td>2048</td><td>58.95</td><td>60.50</td><td>44.43</td><td>0.97×</td><td>284.0</td></tr>
+        <tr><td>4096</td><td>342.2</td><td class="best">324.6</td><td>198.2</td><td><b>1.05×</b></td><td>423.4</td></tr>
+        <tr><td>8192</td><td>2813.9</td><td class="best">2546.4</td><td>1416.1</td><td><b>1.10×</b></td><td>431.8</td></tr>
+      </tbody>
+    </table>
+    <p>这张表是理论预测的直接验证：<b>cube 时间确实打平</b>（8192³ 两者只差 10%，而那 10% 正是权重访存减半带来的），
+      小方阵（512³/1024³）W4A8 反而慢 12–13%——那里总工作量太小，流水启动和多出来的一次 Nd2Nz（A 要发两个平面）
+      占了主导，跟格式无关。</p>
+  </div>
+</section>
+
+<!-- ================= mid-group 代价（追加） ================= -->
+<section id="midgroup">
+  <h2>5. 追加（2026-08-11 第三轮）：mid-group 的代价<span class="tag green">v4 最终数据</span></h2>
+  <div class="card">
+    <p>§3/§4 只测了 Qwen3-32B 的 MLP 两个投影（gate_up/down），格式对比是 W8A8 / W4A8-pc / W4A4。
+      这一轮把测试换成 <b>QwQ-32B 的四个 Linear</b>（补上 attention 的 qkv/o），并新增第三个 W4A8 变体
+      <b>mid-group（w4a8_mg）</b>：权重按 GK=1024/512/256 分组、每组带自己的 scale。探针用
+      <b>退化的 per-group scale 让数学与 per-channel 完全等价</b>——只比流水差异，不比量化精度
+      （<code>scripts/sweep_midgroup_cost.sh</code>）。</p>
+    <p>同一扫法共跑了四轮（v1–v4），<b>v4 为最终数据</b>（<code>results/midgroup_cost_v4.csv</code>），
+      前几轮结论一致。cold，每格 3 次中位数，M = 1, 16, 64, 512, 1024。</p>
+    <div class="callout warn"><b>注意：</b>这轮的 N 和正文不同（gate_up 55296 vs 51200、down 27648 vs 25600，
+      且新增 qkv 7168 / o 5120），<b>绝对数字不能和 §3 直接对比</b>；同一张表内的比值才是本轮结论。</div>
+
+    <h3>qkv_proj（N=7168, K=5120，attention QKV）</h3>
+    <table>
+      <thead><tr>
+        <th>M</th><th>W8A8</th><th><b style="color:var(--w4a8)">W4A8-pc</b></th>
+        <th>mg gk=1024</th><th>mg gk=512</th><th>mg gk=256</th>
+        <th>pc/W8A8</th><th>mg1024/W8A8</th><th>mg1024/pc</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>1</td><td>41.0</td><td class="best">29.0</td><td>31.9</td><td>45.4</td><td>77.9</td><td>1.41×</td><td>1.29×</td><td>1.10×</td></tr>
+        <tr><td>16</td><td>41.2</td><td class="best">28.6</td><td>32.5</td><td>45.2</td><td>77.4</td><td>1.44×</td><td>1.27×</td><td>1.14×</td></tr>
+        <tr><td>64</td><td>46.4</td><td class="best">35.4</td><td>39.5</td><td>53.5</td><td>85.5</td><td>1.31×</td><td>1.17×</td><td>1.12×</td></tr>
+        <tr><td>512</td><td>120.5</td><td class="best">106.1</td><td>148.9</td><td>220.0</td><td>412.0</td><td>1.14×</td><td>0.81×</td><td>1.40×</td></tr>
+        <tr><td>1024</td><td>206.8</td><td class="best">187.4</td><td>272.1</td><td>408.9</td><td>777.2</td><td>1.10×</td><td>0.76×</td><td>1.45×</td></tr>
+      </tbody>
+    </table>
+
+    <h3>o_proj（N=5120, K=5120，attention O）</h3>
+    <table>
+      <thead><tr>
+        <th>M</th><th>W8A8</th><th><b style="color:var(--w4a8)">W4A8-pc</b></th>
+        <th>mg gk=1024</th><th>mg gk=512</th><th>mg gk=256</th>
+        <th>pc/W8A8</th><th>mg1024/W8A8</th><th>mg1024/pc</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>1</td><td>32.5</td><td class="best">25.3</td><td>26.7</td><td>36.4</td><td>58.5</td><td>1.28×</td><td>1.22×</td><td>1.05×</td></tr>
+        <tr><td>16</td><td>32.6</td><td class="best">23.8</td><td>26.4</td><td>36.5</td><td>58.9</td><td>1.37×</td><td>1.24×</td><td>1.11×</td></tr>
+        <tr><td>64</td><td>36.6</td><td class="best">29.7</td><td>32.0</td><td>41.0</td><td>63.9</td><td>1.23×</td><td>1.14×</td><td>1.08×</td></tr>
+        <tr><td>512</td><td>90.7</td><td class="best">77.9</td><td>106.9</td><td>153.9</td><td>281.1</td><td>1.16×</td><td>0.85×</td><td>1.37×</td></tr>
+        <tr><td>1024</td><td>160.3</td><td class="best">136.4</td><td>200.1</td><td>291.6</td><td>546.3</td><td>1.18×</td><td>0.80×</td><td>1.47×</td></tr>
+      </tbody>
+    </table>
+
+    <h3>gate_up_proj（N=55296, K=5120，MLP）</h3>
+    <table>
+      <thead><tr>
+        <th>M</th><th>W8A8</th><th><b style="color:var(--w4a8)">W4A8-pc</b></th>
+        <th>mg gk=1024</th><th>mg gk=512</th><th>mg gk=256</th>
+        <th>pc/W8A8</th><th>mg1024/W8A8</th><th>mg1024/pc</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>1</td><td>249.1</td><td class="best">132.6</td><td>149.7</td><td>267.2</td><td>520.8</td><td>1.88×</td><td>1.66×</td><td>1.13×</td></tr>
+        <tr><td>16</td><td>248.5</td><td class="best">132.6</td><td>149.6</td><td>267.5</td><td>521.3</td><td>1.87×</td><td>1.66×</td><td>1.13×</td></tr>
+        <tr><td>64</td><td>287.2</td><td class="best">165.9</td><td>202.3</td><td>304.5</td><td>537.8</td><td>1.73×</td><td>1.42×</td><td>1.22×</td></tr>
+        <tr><td>512</td><td>1248.9</td><td class="best">794.3</td><td>1028.3</td><td>1558.9</td><td>2940.1</td><td>1.57×</td><td>1.21×</td><td>1.29×</td></tr>
+        <tr><td>1024</td><td>2482.4</td><td class="best">1566.3</td><td>2150.6</td><td>3197.8</td><td>5838.0</td><td>1.58×</td><td>1.15×</td><td>1.37×</td></tr>
+      </tbody>
+    </table>
+    <div class="chart" id="chart-mg-gateup"></div>
+    <div class="legend" id="chart-mg-gateup-legend"></div>
+
+    <h3>down_proj（N=5120, K=27648，MLP）</h3>
+    <table>
+      <thead><tr>
+        <th>M</th><th>W8A8</th><th><b style="color:var(--w4a8)">W4A8-pc</b></th>
+        <th>mg gk=1024</th><th>mg gk=512</th><th>mg gk=256</th>
+        <th>pc/W8A8</th><th>mg1024/W8A8</th><th>mg1024/pc</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>1</td><td>124.5</td><td class="best">73.6</td><td>77.0</td><td>139.8</td><td>267.0</td><td>1.69×</td><td>1.62×</td><td>1.05×</td></tr>
+        <tr><td>16</td><td>124.9</td><td class="best">73.6</td><td>77.7</td><td>139.1</td><td>266.7</td><td>1.70×</td><td>1.61×</td><td>1.06×</td></tr>
+        <tr><td>64</td><td>145.2</td><td class="best">98.6</td><td>106.6</td><td>149.3</td><td>265.0</td><td>1.47×</td><td>1.36×</td><td>1.08×</td></tr>
+        <tr><td>512</td><td>615.5</td><td class="best">373.9</td><td>510.4</td><td>760.2</td><td>1442.6</td><td>1.65×</td><td>1.21×</td><td>1.37×</td></tr>
+        <tr><td>1024</td><td>1202.1</td><td class="best">709.1</td><td>986.4</td><td>1501.7</td><td>2869.9</td><td>1.70×</td><td>1.22×</td><td>1.39×</td></tr>
+      </tbody>
+    </table>
+    <div class="chart" id="chart-mg-downproj"></div>
+    <div class="legend" id="chart-mg-downproj-legend"></div>
+
+    <h3>mid-group 的代价随 M 放大（mg gk=1024 相对 per-channel 的慢速比）</h3>
+    <div class="chart" id="chart-mgpenalty"></div>
+    <div class="legend" id="chart-mgpenalty-legend"></div>
+
+    <h3>本轮结论</h3>
+    <ol>
+      <li><b>W4A8-pc 的领先在 attention 投影上也成立</b>：M=1/16 时 qkv/o 快 <b>1.28–1.44×</b>，
+        gate_up/down 快 <b>1.69–1.88×</b>。qkv/o 的倍数偏小是因为它们的 N 小（7168/5120）：decode 档里
+        A 流、输出写回、启动这些与 N 无关的固定开销占比更高，权重减半的收益被摊薄。</li>
+      <li><b>mid-group 在 910B4 上没有任何赢面——所有 gk 都慢于 per-channel</b>：
+        <ul>
+          <li>gk=1024：M ≤ 64 慢 <b>5–13%</b>（1.05–1.13×）；M=512/1024 慢 <b>37–47%</b>，此时
+            <b>连 W8A8 都打不过</b>（0.76–0.85×）；</li>
+          <li>gk=512：M ≤ 64 慢 1.4–2.0×，M=1024 慢 2.2–2.4×；</li>
+          <li>gk=256：M ≤ 64 慢 2.3–3.9×，M=1024 慢 3.7–4.1×。</li>
+        </ul>
+      </li>
+      <li><b>代价基本随组数线性增长</b>：GK 每减半（1024→512→256，组数翻倍），时间约翻倍
+        （gate_up M=1：149.7 → 267.2 → 520.8 µs）——符合"每个输出 tile 的 scale 处理次数 ∝ 组数"的解释，
+        而 per-channel 每 tile 只有一次。</li>
+      <li><b>结论</b>：910B4 上 W4A8 就用 per-channel；mid-group 的灵活性（每组独立 scale，对组内 outlier
+        更稳）要付实打实的性能税，GK 越大越接近 per-channel，但追不上。</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ================= 读法 ================= -->
+<section id="reading">
+  <h2>6. 读法</h2>
+  <div class="card">
+    <ol>
+      <li><b>"W4A8 能不能达到 W8A8"——能，而且是大幅超过。</b>小 M 尤其明显：M ≤ 16 时 1.65–1.88×。
+        原因很直接：decode 是<b>权重流带宽瓶颈</b>，cube 基本闲着，W4A8 把权重字节砍半就等于把时间砍半；
+        MSD 多出来的那条 <code>mad_s4</code> 落在闲置的 cube 上，一分钱不花。</li>
+      <li><b>小 M 时 W4A8 ≈ W4A4（差 3–8%）。</b>这说明 decode 档"A 用 8bit 还是 4bit"几乎不影响速度——
+        <b>激活可以保留 8bit 精度而几乎不付性能代价</b>。对精度敏感的部署，这是比 W4A4 更实用的点。</li>
+      <li><b>W4A4 的优势只在 M 变大后显现</b>（M ≥ 128 领先 W4A8 1.2–1.7×），因为那时 cube 成了瓶颈，
+        W4A4 的 MAC 数只有 W4A8 的一半。M=128 是 gate_up 的交叉点。</li>
+      <li><b>W4A8 的 2× 上限在哪。</b>相对 W8A8 的理论上限是 2×（权重减半、A 不变、cube 打平）；
+        实测 M ≤ 16 拿到 1.86×，已经很接近。剩下的差距是 A 和输出的字节，以及 W4A8 那一份 int8 A 在
+        cube tile 里占了 2×TILE_M 行带来的 L1 压力。</li>
+      <li>对比 REPORT.md 里的官方基线：官方 <code>npu_weight_quant_batchmatmul</code>（W4A16，即 vLLM 今天的
+        W4 路径）在 gate_up M=1 是 729 µs。本文 W4A8 是 123.7 µs，<b>快 5.9×</b>，而且激活是真 8bit 量化
+        而不是 bf16。</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ================= 复现 ================= -->
+<section id="repro">
+  <h2>7. 复现</h2>
+  <div class="card">
+<pre><code>cd vllm/int4_cube_lab
+bash scripts/build.sh
+export ASCEND_RT_VISIBLE_DEVICES=1        # 不要用 device 0
+
+# 正确性 + 压测
+./build/perchannel_w4a8_gemm_test     --rows 1024 --cols 1024 --k 2048 --check
+./build/perchannel_w4a8_gemm_m16_test --rows 16 --cols 2048 --k 5120 --stress 30
+
+# 吞吐（三种格式同时扫）
+bash scripts/sweep_w4a8.sh square results/w4a8_square.csv
+bash scripts/sweep_w4a8.sh qwen3  results/w4a8_qwen3.csv
+
+# 第三轮：mid-group 代价（QwQ-32B 四投影，cold）
+bash scripts/sweep_midgroup_cost.sh results/midgroup_cost_v4.csv</code></pre>
+    <p>产物：<code>results/w4a8_square.csv</code>、<code>results/w4a8_qwen3.csv</code>、
+      <code>results/midgroup_cost_v4.csv</code>。</p>
+  </div>
+</section>
+
+<!-- ================= 已知限制 ================= -->
+<section id="limits">
+  <h2>8. 已知限制 / 下一步</h2>
+  <div class="card">
+    <ul>
+      <li><b>A 的 MSD 拆分由 host 完成。</b>在真实推理里这一步属于 per-token 量化 kernel 的职责：它本来就要写出
+        int8 激活，改成写两个 int4 平面（<code>a&gt;&gt;4</code> 和 <code>(a^8)&amp;15</code>）是同一趟 elementwise，
+        字节总量不变。本 lab 没有实现那个 kernel，所以 §3 的数字<b>不含</b>拆分成本；对 M=1、K=5120 来说那是
+        5 KB 的 elementwise，相对 123 µs 可以忽略，但要在端到端里验证。</li>
+      <li><code>w_ksum[N]</code> 是权重侧一次性预处理，已在 host 算好；上线时应和量化权重一起存盘。</li>
+      <li>N 必须是 128 的倍数；K 的对齐见 README；<code>K/2 &lt; 65536</code>（<code>Nd2NzParams.srcDValue</code>
+        是 uint16），即 K &lt; 131072。</li>
+      <li>TILE_M 上限 128（L0C 128 KB 卡死）。TILE_N 仍固定 128。</li>
+      <li>第三轮的 mid-group 结论只覆盖 GK=256/512/1024 与 QwQ-32B 四个投影；更细的 GK 只会更差（趋势已明确）。</li>
+      <li>尚未包装成 <code>torch.ops.npu.*</code>，当前是独立 Kernel Launch 基准。</li>
+      <li>M=512/1024 端，本文的 W8A8 baseline 本身比官方 <code>npu_quant_matmul</code> 慢约 1.4×（REPORT.md 读法 3），
+        所以那一段的"W4A8/W8A8"是同结构对比，不等于对官方最优实现的加速比。</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <p>数据来源：<code>results/w4a8_qwen3.csv</code> · <code>results/w4a8_square.csv</code> ·
+    <code>results/midgroup_cost_v4.csv</code>（v1–v4 中最新一轮）与 <code>REPORT_W4A8.md</code>，全部数字经原始 CSV 复核一致。
+    本文档为自包含 HTML，无外部依赖，可离线打开。</p>
+</footer>
+
+</main>
+
+<script>
+/* ================= 图表数据（与表格同源） ================= */
+const COLORS = {
+  w8a8:   { name: 'W8A8',                color: '#3b82f6', w: 2 },
+  w4a8:   { name: 'W4A8-pc',             color: '#dc2626', w: 3.2 },
+  w4a4:   { name: 'W4A4',                color: '#8b5cf6', w: 2, dash: '6 4' },
+  mg1024: { name: 'mg gk=1024',          color: '#f59e0b', w: 2 },
+  mg512:  { name: 'mg gk=512',           color: '#0891b2', w: 2, dash: '4 3' },
+  mg256:  { name: 'mg gk=256',           color: '#9ca3af', w: 2, dash: '2 3' },
+};
+
+/* ---------- 通用折线图（SVG 生成） ---------- */
+function lineChart(elId, series, xLabels, opts) {
+  const W = 980, H = 380, padL = 74, padR = 24, padT = 34, padB = 48;
+  const logY = opts.logY || false;
+  const yLabel = opts.yLabel || '';
+  const xLabel = opts.xLabel || '';
+
+  let all = [];
+  series.forEach(s => all = all.concat(s.values));
+  let yMin = Math.min(...all), yMax = Math.max(...all);
+  if (logY) {
+    yMin = Math.pow(10, Math.floor(Math.log10(yMin)));
+    yMax = Math.pow(10, Math.ceil(Math.log10(yMax)));
+    if (yMin <= 0) yMin = 1;
+  } else {
+    yMin = 0; yMax = yMax * 1.12;
+  }
+
+  let ticks;
+  if (logY) {
+    ticks = [];
+    for (let b = yMin; b <= yMax * 1.01; b *= 10) {
+      for (const m of [1, 2, 5]) {
+        const t = m * b;
+        if (t >= yMin && t <= yMax * 1.001) ticks.push(t);
+      }
+    }
+    if (ticks.length > 8) {
+      ticks = ticks.filter((t, i) => {
+        const m = t / Math.pow(10, Math.floor(Math.log10(t)));
+        return m === 1 || m === 5;
+      });
+    }
+  } else {
+    const step = yMax / 5;
+    ticks = [];
+    for (let i = 0; i <= 5; i++) ticks.push(i * step);
+  }
+
+  const yAt = v => {
+    if (logY) {
+      const lmin = Math.log10(yMin), lmax = Math.log10(yMax);
+      const f = (Math.log10(v) - lmin) / (lmax - lmin);
+      return padT + (H - padT - padB) * (1 - f);
+    }
+    return padT + (H - padT - padB) * (1 - (v - yMin) / (yMax - yMin));
+  };
+  const xAt = i => padL + (W - padL - padR) * (xLabels.length === 1 ? 0.5 : i / (xLabels.length - 1));
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="inherit">`;
+  ticks.forEach(t => {
+    const y = yAt(t);
+    svg += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#e8ecf1" stroke-width="1"/>`;
+    let label = t;
+    if (t >= 10000) label = (t / 1000) + 'k';
+    svg += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" font-size="11.5" fill="#6b7280">${label}</text>`;
+  });
+  xLabels.forEach((l, i) => {
+    svg += `<text x="${xAt(i)}" y="${H - padB + 20}" text-anchor="middle" font-size="11.5" fill="#6b7280">${l}</text>`;
+  });
+  svg += `<text x="${padL - 52}" y="${padT - 6}" font-size="12" fill="#374151" transform="rotate(-90 ${padL - 52} ${padT - 6})" text-anchor="middle">${yLabel}</text>`;
+  svg += `<text x="${(padL + W - padR) / 2}" y="${H - 10}" font-size="12" fill="#374151" text-anchor="middle">${xLabel}</text>`;
+
+  series.forEach(s => {
+    const pts = s.values.map((v, i) => [xAt(i), yAt(v)]);
+    let d = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+    svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.w}" ${s.dash ? `stroke-dasharray="${s.dash}"` : ''} stroke-linejoin="round" stroke-linecap="round" opacity="0.9"/>`;
+    pts.forEach((p, i) => {
+      svg += `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${s.w >= 3 ? 4.5 : 3.2}" fill="${s.color}"/>`;
+      svg += `<title>${s.name} @ M=${xLabels[i]}: ${s.values[i]}</title>`;
+    });
+  });
+  svg += '</svg>';
+
+  document.getElementById(elId).innerHTML = svg;
+  const legend = document.getElementById(elId + '-legend');
+  if (legend) {
+    legend.innerHTML = series.map(s =>
+      `<span style="margin-right:18px;white-space:nowrap"><span class="dot" style="background:${s.color}"></span>${s.name}</span>`
+    ).join('');
+  }
+}
+
+/* ================= §3：Qwen3 MLP（W8A8 / W4A8 / W4A4，log 延迟） ================= */
+const MLP_X = ['1', '4', '16', '64', '128', '512', '1024'];
+const gateUp = {
+  w8a8: [229.9, 231.4, 229.7, 264.1, 328.0, 1156.9, 2284.8],
+  w4a8: [123.7, 123.3, 122.9, 153.4, 255.6, 732.1, 1451.2],
+  w4a4: [119.9, 119.2, 119.4, 133.7, 160.7, 580.5, 1181.8],
+};
+const downProj = {
+  w8a8: [115.3, 114.6, 115.5, 133.0, 167.6, 551.0, 1058.9],
+  w4a8: [68.5, 69.4, 69.1, 91.8, 117.5, 341.8, 653.1],
+  w4a4: [64.4, 64.1, 64.7, 73.6, 86.6, 214.5, 394.5],
+};
+const MLP_SERIES = [
+  { ...COLORS.w8a8 },
+  { ...COLORS.w4a8 },
+  { ...COLORS.w4a4 },
+];
+lineChart('chart-gateup', [
+  { ...MLP_SERIES[0], values: gateUp.w8a8 },
+  { ...MLP_SERIES[1], values: gateUp.w4a8 },
+  { ...MLP_SERIES[2], values: gateUp.w4a4 },
+], MLP_X, { yLabel: '延迟 µs (log)', xLabel: 'M（batch / seq len）', logY: true });
+document.getElementById('chart-gateup').insertAdjacentHTML('afterend',
+  `<div class="legend">gate_up_proj N=51200 K=5120 · 对数刻度 · ${MLP_SERIES.map(s => `<span style="margin-right:18px;white-space:nowrap"><span class="dot" style="background:${s.color}"></span>${s.name}</span>`).join('')}</div>`);
+
+lineChart('chart-downproj', [
+  { ...MLP_SERIES[0], values: downProj.w8a8 },
+  { ...MLP_SERIES[1], values: downProj.w4a8 },
+  { ...MLP_SERIES[2], values: downProj.w4a4 },
+], MLP_X, { yLabel: '延迟 µs (log)', xLabel: 'M（batch / seq len）', logY: true });
+document.getElementById('chart-downproj').insertAdjacentHTML('afterend',
+  `<div class="legend">down_proj N=5120 K=25600 · 对数刻度 · ${MLP_SERIES.map(s => `<span style="margin-right:18px;white-space:nowrap"><span class="dot" style="background:${s.color}"></span>${s.name}</span>`).join('')}</div>`);
+
+/* ================= §5 追加：QwQ-32B 四投影（v4，5 条曲线，log 延迟） ================= */
+const MG_X = ['1', '16', '64', '512', '1024'];
+const mgGateUp = {
+  w8a8: [249.14, 248.51, 287.24, 1248.86, 2482.42],
+  pc:   [132.56, 132.60, 165.91, 794.28, 1566.34],
+  mg1024: [149.71, 149.64, 202.27, 1028.26, 2150.55],
+  mg512:  [267.20, 267.54, 304.49, 1558.92, 3197.79],
+  mg256:  [520.79, 521.26, 537.84, 2940.13, 5838.01],
+};
+const mgDown = {
+  w8a8: [124.50, 124.86, 145.20, 615.46, 1202.06],
+  pc:   [73.60, 73.59, 98.64, 373.87, 709.07],
+  mg1024: [77.01, 77.65, 106.62, 510.38, 986.44],
+  mg512:  [139.76, 139.14, 149.26, 760.23, 1501.69],
+  mg256:  [267.02, 266.73, 265.02, 1442.57, 2869.88],
+};
+const MG_SERIES = [
+  { ...COLORS.w8a8 },
+  { ...COLORS.w4a8 },
+  { ...COLORS.mg1024 },
+  { ...COLORS.mg512 },
+  { ...COLORS.mg256 },
+];
+lineChart('chart-mg-gateup', [
+  { ...MG_SERIES[0], values: mgGateUp.w8a8 },
+  { ...MG_SERIES[1], values: mgGateUp.pc },
+  { ...MG_SERIES[2], values: mgGateUp.mg1024 },
+  { ...MG_SERIES[3], values: mgGateUp.mg512 },
+  { ...MG_SERIES[4], values: mgGateUp.mg256 },
+], MG_X, { yLabel: '延迟 µs (log)', xLabel: 'M', logY: true });
+document.getElementById('chart-mg-gateup').insertAdjacentHTML('afterend',
+  `<div class="legend">gate_up_proj N=55296 K=5120（v4，cold）· 对数刻度 · ${MG_SERIES.map(s => `<span style="margin-right:18px;white-space:nowrap"><span class="dot" style="background:${s.color}"></span>${s.name}</span>`).join('')}</div>`);
+
+lineChart('chart-mg-downproj', [
+  { ...MG_SERIES[0], values: mgDown.w8a8 },
+  { ...MG_SERIES[1], values: mgDown.pc },
+  { ...MG_SERIES[2], values: mgDown.mg1024 },
+  { ...MG_SERIES[3], values: mgDown.mg512 },
+  { ...MG_SERIES[4], values: mgDown.mg256 },
+], MG_X, { yLabel: '延迟 µs (log)', xLabel: 'M', logY: true });
+document.getElementById('chart-mg-downproj').insertAdjacentHTML('afterend',
+  `<div class="legend">down_proj N=5120 K=27648（v4，cold）· 对数刻度 · ${MG_SERIES.map(s => `<span style="margin-right:18px;white-space:nowrap"><span class="dot" style="background:${s.color}"></span>${s.name}</span>`).join('')}</div>`);
+
+/* ================= mid-group 代价：mg1024/pc 慢速比（线性） ================= */
+lineChart('chart-mgpenalty', [
+  { name: 'qkv_proj',   color: '#0f4c81', w: 2, values: [1.099, 1.137, 1.118, 1.404, 1.452] },
+  { name: 'o_proj',     color: '#16a34a', w: 2, values: [1.055, 1.105, 1.078, 1.373, 1.467] },
+  { name: 'gate_up_proj', color: '#f59e0b', w: 2, values: [1.129, 1.129, 1.219, 1.295, 1.373] },
+  { name: 'down_proj',  color: '#8b5cf6', w: 2, values: [1.046, 1.055, 1.081, 1.365, 1.391] },
+], MG_X, { yLabel: 'mg1024 / pc 延迟比', xLabel: 'M（1.0 = 与 per-channel 持平，越高越慢）', logY: false });
+document.getElementById('chart-mgpenalty').insertAdjacentHTML('afterend',
+  `<div class="legend">mg gk=1024 相对 W4A8-pc 的延迟比（v4）· 四个投影都在 M=512/1024 放大到 1.37–1.47×，小 M 为 1.05–1.13×</div>`);
+</script>
+
+</body>
+</html>

@@ -1,0 +1,15 @@
+# P5 D8/D9.  TILE_M=128, GK=1024, asym.  --cold --profile --nosync, median-of-3.
+# split2 = two-pass MSD flush (hi pass -> flush -> lo pass -> flush): restores
+#          CROSS-GROUP L0C double buffering.  Bit-exact (10/10 at qkv M=512).
+# band    = L2-banded tileId->(m,n) traversal, 32 MB band cap.  Bit-exact.
+# qkv/o are NOT banded (B = N*K/2 = 18.4 / 13.1 MB < the 32 MB cap), so they are
+# the built-in control: band must be a no-op there, and it is.
+proj,M,N,K,full_us,split2_us,band_us,band_twopass_us,nofix_us,pc_us
+qkv,512,7168,5120,150.77,149.37,150.46,149.61,102.12,106.34
+qkv,1024,7168,5120,275.26,274.66,275.41,273.76,182.30,187.48
+o,512,5120,5120,108.02,107.25,,,74.82,77.36
+o,1024,5120,5120,197.19,197.75,,,131.75,138.31
+gate_up,512,55296,5120,1048.35,,1018.69,1017.38,705.34,794.67
+gate_up,1024,55296,5120,2196.74,,2095.56,2145.91,1377.97,1565.03
+down,512,5120,27648,511.80,510.78,499.08,497.55,363.79,367.65
+down,1024,5120,27648,999.31,999.34,979.89,979.35,692.89,710.31

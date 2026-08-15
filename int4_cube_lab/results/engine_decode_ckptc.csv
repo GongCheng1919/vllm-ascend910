@@ -1,0 +1,5 @@
+arm,layers,tp,graph,batch,total_s,gen_tok,step_us,per_layer_us
+bf16,4,1,aclgraph,1,0.5483,64,8567.09,2141.773
+w4a8,4,1,aclgraph,1,0.4355,64,6803.96,1700.990
+bf16,16,1,aclgraph,1,1.4964,64,23381.30,1461.332
+w4a8,16,1,aclgraph,1,1.1101,64,17345.52,1084.095
