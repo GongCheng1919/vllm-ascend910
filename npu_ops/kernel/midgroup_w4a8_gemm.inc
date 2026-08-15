@@ -70,6 +70,60 @@ namespace {
 #ifndef ASYM_CFG
 #define ASYM_CFG 0
 #endif
+// P5 ablation: build the AIV as handshake-ONLY -- it waits for each flush and
+// immediately returns the slot, doing no staging, no combine, no store.  The
+// output is garbage by construction; the ONLY use is timing.  It answers the
+// one question the profiler could not (P5_KERNEL_OPT.md §4): is the AIC waiting
+// on the AIV, or is the AIC itself the limit?  Never enable in a shipped build.
+#ifndef ABLATE_AIV_CFG
+#define ABLATE_AIV_CFG 0
+#endif
+// P5 ablation, AIC side.  0 = full.  1 = no Fixpipe (the L0C->GM flush).
+// 2 = GM->L1 DMA only: no L1->L0, no Mmad, no Fixpipe -- the weight-streaming
+// floor for THIS access pattern.  Flush accounting is preserved at every level
+// so the AIV never deadlocks.  Output is garbage; timing only.
+#ifndef ABLATE_AIC_CFG
+#define ABLATE_AIC_CFG 0
+#endif
+// P5 (2026-08-14, D6): split the stacked MSD flush into two half-height L0C
+// tiles.  A TILE_MC x TILE_N int32 tile is EXACTLY the whole 128 KB L0C at
+// TILE_M=128, so kL0CDepth collapses to 1 and every quant-group flush
+// serialises the cube -- measured as 100% of the large-M mid-group tax
+// (P5_KERNEL_OPT.md 3''.3).  Those 2*TILE_M rows are not one GEMM tile: they
+// are the MSD hi and lo planes, which already land in two separate workspace
+// halves and are already consumed separately by the AIV.  Issuing them as two
+// Mmads into two 64 KB L0C tiles and two Fixpipes restores double buffering
+// WITHOUT touching TILE_M / TILE_N -- so the GM->L1 stream, which dominates the
+// traffic, is byte-for-byte identical.  Shrinking a tile instead cannot win:
+// under a fixed L0C area the traffic optimum is TILE_N = 2*TILE_M, and every
+// depth-2 shape costs >= 1.33x the DMA (3''.4/.5).
+#ifndef SPLIT_MSD_FLUSH_CFG
+#define SPLIT_MSD_FLUSH_CFG 0
+#endif
+// P5 D10 (2026-08-15): BF16 FLUSH -- the cube converts each int32 partial to
+// bf16 on the way out (QuantMode_t::QS322BF16_PRE), halving the workspace bytes
+// in BOTH directions.  This is the only lever left that attacks the actual cost
+// (D8: four scheduling changes all landed within 5%; the flush is charged per
+// byte at 1.5-2.0 TB/s).
+//
+// *** THIS BUILD IS NOT BIT-EXACT WITH fakequant_lab AND MUST NEVER BE THE
+// *** DEFAULT.  It is a SPARE, kept ready to enable once the accuracy budget
+// *** for it has been measured (P5_KERNEL_OPT.md 3''.8 / D10).
+//
+// Range is fine and fp16 would NOT be: |S| <= 8*8*GK = 65536 and 16*S_hi
+// reaches ~1e6, well past fp16's 65504, while bf16 tops out at 3.4e38.  What it
+// costs is mantissa -- bf16 keeps 8 bits, so each group partial carries ~0.2%
+// relative error.  The 16*S_hi + S_lo combine itself stays EXACT: it happens in
+// fp32 after the cast, and 16*65536 < 2^24.
+#ifndef BF16_FLUSH_CFG
+#define BF16_FLUSH_CFG 0
+#endif
+// P5 D9: L2-banded tile traversal.  0 = flat (m-outer, n-inner), the historical
+// order.  1 = band N so a band's weight slice stays L2-resident across the
+// M-sweep.  Pure scheduling change: same tiles, same math, bit-exact.
+#ifndef BAND_N_CFG
+#define BAND_N_CFG 0
+#endif
 
 constexpr bool     kAsym   = (ASYM_CFG != 0);
 constexpr uint32_t TILE_M  = TILE_M_CFG;
@@ -98,7 +152,14 @@ constexpr uint32_t SLICES_PER_QGROUP = GK / INNER_K;
 // The L1 slab holds a whole number of quant groups, sized back up to the same
 // GM->L1 granularity the per-channel kernel used (so DMA efficiency is
 // unchanged and only the flush rate varies with GK).
-constexpr uint32_t kTargetGroupKB  = (TILE_M <= 64) ? 1024 : 512;
+// P5: the GM->L1 burst length per row.  The ablation ladder showed this kernel
+// is pure GM->L1 DMA -- dropping every Mmad and the Fixpipe changed nothing --
+// so this constant, not the cube, sets the run time.  Overridable to sweep it.
+#ifndef TARGET_GROUP_KB_CFG
+#define TARGET_GROUP_KB_CFG 0
+#endif
+constexpr uint32_t kTargetGroupKB  = TARGET_GROUP_KB_CFG ? (uint32_t)TARGET_GROUP_KB_CFG
+                                                         : ((TILE_M <= 64) ? 1024 : 512);
 constexpr uint32_t QGROUP_KB       = SLICES_PER_QGROUP * INNER_KB;
 constexpr uint32_t QGROUPS_PER_L1  = (kTargetGroupKB / QGROUP_KB) ? (kTargetGroupKB / QGROUP_KB) : 1;
 constexpr uint32_t SLICES_PER_GROUP = QGROUPS_PER_L1 * SLICES_PER_QGROUP;
@@ -118,12 +179,47 @@ constexpr uint32_t kSliceStrideB = INNER_KB * TILE_N;
 // On-chip budgets (910B4): L1 512 KB, L0A/L0B 64 KB each, L0C 128 KB, UB 192 KB.
 // L0C gets depth 2 whenever it fits, so the next group's Mmad overlaps this
 // group's Fixpipe -- that overlap is the whole point at small GK.
-constexpr uint32_t kL0CTileBytes = TILE_MC * TILE_N * sizeof(int32_t);
+constexpr bool     kBf16Flush    = (BF16_FLUSH_CFG != 0);
+// Pre-scale applied by the Fixpipe dequant so the int32 partial fits fp16 with
+// headroom: |S| <= 8*8*GK = 65536 and fp16 tops out at 65504.  Power of two ->
+// exact, and the AIV multiplies it straight back out.
+constexpr float    kWsDeqScale   = 0.0625f;      // must match fp.deqScalar
+#if BF16_FLUSH_CFG
+using WsElem = half;                             // 2 B: half the flush traffic
+#else
+using WsElem = int32_t;                          // 4 B: the exact contract
+#endif
+constexpr bool     kSplitFlush   = (SPLIT_MSD_FLUSH_CFG != 0);
+// =2 additionally REORDERS the group: all of the hi plane's slices, flush hi,
+// then all of the lo plane's slices, flush lo.  =1 kept both accumulators live
+// across the whole group (Mmads interleaved per slice) and fired both Fixpipes
+// at the group boundary, which only bought a half-group of lookahead and
+// measured 2-4% SLOWER (P5_KERNEL_OPT.md 3''.6).  With the two-pass order each
+// Fixpipe has a full 4-slice Mmad pass to hide under and the hi buffer is free
+// again long before the next group needs it -- i.e. CROSS-GROUP L0C double
+// buffering at TILE_M=128, which is what nitro's int8 mid_group_gemm_fwd.cpp
+// gets for free (its L0C tile is 64 KB because it has no MSD plane pair).
+constexpr bool     kSplitTwoPass = (SPLIT_MSD_FLUSH_CFG == 2);
+// Rows per L0C tile / per Mmad / per Fixpipe: the whole stacked pair, or one
+// MSD plane when the flush is split.
+constexpr uint32_t kCTileM       = kSplitFlush ? TILE_M : TILE_MC;
+constexpr uint32_t kL0CTileBytes = kCTileM * TILE_N * sizeof(int32_t);
 constexpr uint32_t kL0CDepth     = (2 * kL0CTileBytes <= 128 * 1024) ? 2 : 1;
+// Byte offset of the lo plane inside one L0A slice tile.  LoadSliceL1ToL0 lays
+// the kMBlocks 16-row fractal blocks out back to back, so plane boundaries are
+// block boundaries and the lo plane is a valid standalone Mmad operand.
+constexpr uint32_t kLoPlaneL0AOff = TILE_M * INNER_KB;
 
 static_assert(2 * TILE_MC * INNER_KB <= 64 * 1024, "L0A over budget");
 static_assert(2 * TILE_N  * INNER_KB <= 64 * 1024, "L0B over budget");
 static_assert(kL0CDepth * kL0CTileBytes <= 128 * 1024, "L0C over budget");
+// The split holds both planes' accumulators at once, so it needs the depth it
+// just bought.  (TILE_M=128: 2 x 64 KB = the full L0C.)
+static_assert(!kSplitFlush || kL0CDepth >= 2, "split flush needs two L0C buffers");
+// The two-pass body assumes one L1 slab == one quant group, so that a pass is
+// exactly SLICES_PER_QGROUP slices and cmatrixInitVal keys off the slice index.
+static_assert(!kSplitTwoPass || QGROUPS_PER_L1 == 1,
+              "two-pass flush needs QGROUPS_PER_L1 == 1 (true at TILE_M=128)");
 static_assert(2 * (TILE_MC + TILE_N) * GROUP_KB <= 512 * 1024, "L1 over budget");
 
 // Two flag pairs and a double-buffered workspace slot.  With a single pair the
@@ -193,6 +289,62 @@ __aicore__ inline void LoadSliceL1ToL0(const LocalTensor<int8_t>& aL0,
     LoadData(bL0.ReinterpretCast<int4b_t>(), bL1.ReinterpretCast<int4b_t>(), ldB);
 }
 
+// Two-pass variant: load ONE MSD plane's TILE_M rows (kMBlocksPlane 16-row
+// fractal blocks starting at rowBlkOff) plus the whole B slice.  The L1 A slab
+// keeps both planes interleaved at TILE_MC-row granularity, so a plane is a
+// contiguous run of fractal blocks and ldA's srcStride (kMBlocks, the L1
+// K-fractal pitch) is unchanged.  A's L0A bytes per pass are halved, so the two
+// passes move the same A total as one stacked pass; only B is loaded twice, and
+// that is L1->L0B, never GM.
+constexpr uint32_t kMBlocksPlane = TILE_M / kBlock;
+
+__aicore__ inline void LoadPlaneSliceL1ToL0(const LocalTensor<int8_t>& aL0,
+                                            const LocalTensor<int8_t>& bL0,
+                                            const LocalTensor<int8_t>& aL1,
+                                            const LocalTensor<int8_t>& bL1,
+                                            const LoadData2dParams& ldA,
+                                            const LoadData2dParams& ldB,
+                                            uint32_t rowBlkOff)
+{
+    for (uint32_t mi = 0; mi < kMBlocksPlane; mi++) {
+        LoadData(aL0[mi * kKBlocksInner * kNzBlockSize].ReinterpretCast<int4b_t>(),
+                 aL1[(rowBlkOff + mi) * kNzBlockSize].ReinterpretCast<int4b_t>(), ldA);
+    }
+    LoadData(bL0.ReinterpretCast<int4b_t>(), bL1.ReinterpretCast<int4b_t>(), ldB);
+}
+
+// ---- L2-banded tile traversal (P5 D9) ----------------------------------
+// The flat (m-outer, n-inner) order re-streams the WHOLE weight once per M-tile
+// row.  When B is large relative to L2 that refetch comes from HBM every time.
+// Banding N into L2-sized bands and sweeping every M-tile inside a band keeps
+// the band's B slice resident across the M-sweep, so B is read from HBM ~once
+// while A (the smaller operand) stays resident across bands.  Ported from
+// nitro/csrc/kernel/mid_group_gemm_fwd.cpp; only the tileId->(m,n) mapping
+// changes, so AIC and AIV still walk identical tiles in lockstep and the
+// numerics are untouched.
+//
+// int4 note: B is N*Kb bytes here (Kb = K/2), HALF the int8 kernel this comes
+// from -- so several QwQ shapes that forced banding there stay flat here, which
+// makes qkv/o a built-in A/B control for the change.
+constexpr uint64_t kBandCapBytes = 32ull * 1024 * 1024;
+
+__aicore__ inline void TileToMN(uint32_t tileId, uint32_t superN,
+                                uint32_t numFullBands, uint32_t fullBandTiles,
+                                uint32_t remN, uint32_t& mTile, uint32_t& nTile)
+{
+    const uint32_t fullTiles = numFullBands * fullBandTiles;
+    if (tileId < fullTiles) {
+        const uint32_t band   = tileId / fullBandTiles;
+        const uint32_t within = tileId - band * fullBandTiles;
+        mTile = within / superN;
+        nTile = band * superN + (within - mTile * superN);
+    } else {
+        const uint32_t within = tileId - fullTiles;
+        mTile = within / remN;
+        nTile = numFullBands * superN + (within - mTile * remN);
+    }
+}
+
 template <typename A1Q, typename B1Q>
 __aicore__ inline void IssueGroupLoad(A1Q& a1Queue, B1Q& b1Queue,
                                       const GlobalTensor<int8_t>& aHiGm,
@@ -220,9 +372,10 @@ __aicore__ inline void IssueGroupLoad(A1Q& a1Queue, B1Q& b1Queue,
 // before the fp32 cast so the two partial products add exactly.
 // `wsF32` / `ksF32` / `rowScaleBrcb` (and, for asym, `wzF32` / `akBrcb`) are
 // already rebased onto this quant group's slice of the batched staging buffers.
-__aicore__ inline void AccumulateGroupChunk(const LocalTensor<int32_t>& hi,
-                                            const LocalTensor<int32_t>& lo,
+__aicore__ inline void AccumulateGroupChunk(const LocalTensor<WsElem>& hi,
+                                            const LocalTensor<WsElem>& lo,
                                             const LocalTensor<float>& temp,
+                                            const LocalTensor<float>& temp2,
                                             const LocalTensor<float>& acc,
                                             const LocalTensor<float>& wsF32,
                                             const LocalTensor<float>& ksF32,
@@ -234,9 +387,22 @@ __aicore__ inline void AccumulateGroupChunk(const LocalTensor<int32_t>& hi,
     const uint32_t off         = chunk * CHUNK_ELEMS;
     const uint32_t rowScaleOff = chunk * CHUNK_M * 8;
 
+#if BF16_FLUSH_CFG
+    // The planes arrive as fp16(S * kWsDeqScale).  Undo the scale and apply the
+    // MSD weight in one shot per plane: 16 / kWsDeqScale = 256 for the hi plane,
+    // 1 / kWsDeqScale = 16 for the lo one.  Both factors are powers of two and
+    // the fold happens in fp32 (16*65536 < 2^24), so the ONLY error in the whole
+    // path is the single fp16 rounding the cube did on the way out.
+    Cast(temp[off],  hi[off], RoundMode::CAST_NONE, CHUNK_ELEMS);
+    Cast(temp2[off], lo[off], RoundMode::CAST_NONE, CHUNK_ELEMS);
+    Muls(temp[off],  temp[off],  16.0f / kWsDeqScale, CHUNK_ELEMS);
+    Muls(temp2[off], temp2[off], 1.0f / kWsDeqScale, CHUNK_ELEMS);
+    Add(temp[off], temp[off], temp2[off], CHUNK_ELEMS);
+#else
     Muls(hi[off], hi[off], 16, CHUNK_ELEMS);
     Add(hi[off], hi[off], lo[off], CHUNK_ELEMS);
     Cast(temp[off], hi[off], RoundMode::CAST_NONE, CHUNK_ELEMS);
+#endif
 
     // src1 is a 64-float row re-read on every repeat (src1RepStride = 0).
     BinaryRepeatParams rowParam(1, 1, 1, 16, 16, 0);
@@ -284,11 +450,30 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
     const uint32_t lastGSlices = numSlices - (numG - 1) * SLICES_PER_GROUP;
     const uint32_t g0Slices    = (numG == 1) ? lastGSlices : SLICES_PER_GROUP;
 
+    // L2 banding params -- computed identically on AIC and AIV so both engines
+    // map a tileId to the same (m, n).  superN == numNTiles degenerates to the
+    // flat mapping, bit-identical to the pre-D9 traversal.
+    uint32_t superN = numNTiles;
+#if BAND_N_CFG
+    if ((uint64_t)N * Kb > kBandCapBytes) {
+        uint32_t s = static_cast<uint32_t>(kBandCapBytes / ((uint64_t)TILE_N * Kb));
+        if (s < 1) s = 1;
+        if (s > numNTiles) s = numNTiles;
+        superN = s;
+    }
+#endif
+    const uint32_t numMTiles     = M / TILE_M;
+    const uint32_t numFullBands  = numNTiles / superN;
+    const uint32_t fullBandTiles = superN * numMTiles;
+    const uint32_t remN          = numNTiles - numFullBands * superN;
+
     // Two slots per block: slot = (global flush index) & 1.
     constexpr uint32_t kWsElems = TILE_MC * TILE_N;
-    GlobalTensor<int32_t> wsGm;
+    // The host always sizes the workspace for int32; a bf16 flush simply uses
+    // half of it, so no host change is needed to enable the spare.
+    GlobalTensor<WsElem> wsGm;
     wsGm.SetGlobalBuffer(
-        reinterpret_cast<__gm__ int32_t*>(workspace) + (uint64_t)blockIdx * 2 * kWsElems,
+        reinterpret_cast<__gm__ WsElem*>(workspace) + (uint64_t)blockIdx * 2 * kWsElems,
         2 * kWsElems);
 
     // ============================ AIC ============================
@@ -343,16 +528,29 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
 
         FixpipeParamsV220 fp;
         fp.nSize       = TILE_N;
-        fp.mSize       = TILE_MC;
-        fp.srcStride   = TILE_MC;
+        fp.mSize       = kCTileM;
+        fp.srcStride   = kCTileM;
         fp.dstStride   = TILE_N;
+#if BF16_FLUSH_CFG
+        // int32 -> fp16, scaled by kWsDeqScale on the way out.  QS322BF16_PRE
+        // (int32 -> bf16) exists in the ISA enum but V220's Fixpipe dispatch
+        // does not implement it, and every F322* mode needs an fp32 L0C, which
+        // an integer MAD cannot produce.  DEQF16 is the only narrowing mode this
+        // hardware offers for an int32 accumulator -- and it is the BETTER one:
+        // fp16 keeps 10 mantissa bits to bf16's 8.  The pre-scale exists purely
+        // to buy range headroom (|S| <= 8*8*GK = 65536 vs fp16's 65504); it is a
+        // power of two, so it costs nothing and the AIV undoes it exactly.
+        fp.quantPre    = QuantMode_t::DEQF16;
+        fp.deqScalar   = 0x3D800000ull;                 // 0.0625f = kWsDeqScale
+#else
         fp.quantPre    = QuantMode_t::NoQuant;
+#endif
         fp.ndNum       = 1;
         fp.srcNdStride = 1;
         fp.dstNdStride = 1;
 
         MmadParams mm;
-        mm.m             = TILE_MC;
+        mm.m             = kCTileM;
         mm.n             = TILE_N;
         mm.k             = INNER_K;
         mm.cmatrixSource = false;
@@ -360,8 +558,8 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
         uint32_t flushIdx = 0;          // global flush counter; AIV mirrors it
         bool tileG0Prefetched = false;
         for (uint32_t tileId = blockIdx; tileId < numTiles; tileId += blockDim) {
-            const uint32_t mTile = tileId / numNTiles;
-            const uint32_t nTile = tileId % numNTiles;
+            uint32_t mTile, nTile;
+            TileToMN(tileId, superN, numFullBands, fullBandTiles, remN, mTile, nTile);
             const uint64_t aTileBase = (uint64_t)mTile * TILE_M * Kb;
             const uint64_t bTileBase = (uint64_t)nTile * TILE_N * Kb;
 
@@ -371,7 +569,7 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
             }
             tileG0Prefetched = false;
 
-            LocalTensor<int32_t> cL0;
+            LocalTensor<int32_t> cL0, cL0Lo;
             uint32_t sInQ = 0;              // slices accumulated into the live L0C
 
             for (uint32_t g = 0; g < numG; g++) {
@@ -388,6 +586,92 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
                 auto aL1 = a1Queue.DeQue<int8_t>();
                 auto bL1 = b1Queue.DeQue<int8_t>();
 
+#if ABLATE_AIC_CFG >= 2
+                // DMA-only.  Flushes for THIS L1 slab come from its slice count,
+                // not from QGROUPS_PER_L1 -- the last slab is short (K=5120 is
+                // 5 groups over 3 slabs), and over-signalling would hang the AIV.
+                a1Queue.FreeTensor(aL1);
+                b1Queue.FreeTensor(bL1);
+                for (uint32_t q = 0; q < slices / SLICES_PER_QGROUP; q++) {
+                    const uint32_t slot = flushIdx & 1u;
+                    if (flushIdx >= 2) {
+                        if (slot == 0) CrossCoreWaitFlag(kAivToAicFlag0);
+                        else           CrossCoreWaitFlag(kAivToAicFlag1);
+                    }
+                    if (slot == 0) CrossCoreSetFlag<kCrossMode, PIPE_MTE2>(kAicToAivFlag0);
+                    else           CrossCoreSetFlag<kCrossMode, PIPE_MTE2>(kAicToAivFlag1);
+                    flushIdx++;
+                }
+#else
+                if constexpr (kSplitTwoPass) {
+                // ---- two passes over the same L1 slab, one MSD plane each ----
+                // Pass 0's Fixpipe drains while pass 1's Mmads run; pass 1's
+                // drains under the NEXT group's pass 0.  Only one accumulator is
+                // ever being filled, so the other L0C buffer is always free ->
+                // cross-group double buffering at TILE_M=128 (D8).  Both planes
+                // land in the same workspace slot at the same offsets the AIV
+                // already reads (rowOffHi / rowOffLo), so the AIV is untouched
+                // and the slot's bytes are identical to the stacked build.
+                const uint32_t slot = flushIdx & 1u;
+                for (uint32_t plane = 0; plane < 2; plane++) {
+                    const uint32_t rowBlkOff = plane * kMBlocksPlane;
+                    {
+                        auto aL0p = a2Queue.AllocTensor<int8_t>();
+                        auto bL0p = b2Queue.AllocTensor<int8_t>();
+                        LoadPlaneSliceL1ToL0(aL0p, bL0p, aL1, bL1, ldA, ldB, rowBlkOff);
+                        a2Queue.EnQue(aL0p);
+                        b2Queue.EnQue(bL0p);
+                    }
+                    auto cAcc = c1Queue.AllocTensor<int32_t>();
+                    for (uint32_t s = 0; s < slices; s++) {
+                        if (s + 1 < slices) {
+                            auto aL0n = a2Queue.AllocTensor<int8_t>();
+                            auto bL0n = b2Queue.AllocTensor<int8_t>();
+                            LoadPlaneSliceL1ToL0(aL0n, bL0n,
+                                                 aL1[(s + 1) * kSliceStrideA],
+                                                 bL1[(s + 1) * kSliceStrideB],
+                                                 ldA, ldB, rowBlkOff);
+                            a2Queue.EnQue(aL0n);
+                            b2Queue.EnQue(bL0n);
+                        }
+
+                        auto aL0 = a2Queue.DeQue<int8_t>();
+                        auto bL0 = b2Queue.DeQue<int8_t>();
+
+                        // The L1 slab feeds BOTH passes: release it only after
+                        // the last slice of the second one.
+                        if (plane == 1 && s + 1 == slices) {
+                            a1Queue.FreeTensor(aL1);
+                            b1Queue.FreeTensor(bL1);
+                        }
+
+                        mm.cmatrixInitVal = (s == 0);
+                        Mmad(cAcc, aL0.ReinterpretCast<int4b_t>(),
+                             bL0.ReinterpretCast<int4b_t>(), mm);
+
+                        a2Queue.FreeTensor(aL0);
+                        b2Queue.FreeTensor(bL0);
+                    }
+
+                    c1Queue.EnQue(cAcc);
+                    auto cOut = c1Queue.DeQue<int32_t>();
+                    // One credit per quant group: taken before the first half
+                    // lands, returned only after the second, because the slot
+                    // holds both planes exactly as in the stacked build.
+                    if (plane == 0 && flushIdx >= 2) {
+                        if (slot == 0) CrossCoreWaitFlag(kAivToAicFlag0);
+                        else           CrossCoreWaitFlag(kAivToAicFlag1);
+                    }
+#if ABLATE_AIC_CFG < 1
+                    Fixpipe<WsElem, int32_t, CFG_ROW_MAJOR>(
+                        wsGm[slot * kWsElems + plane * TILE_M * TILE_N], cOut, fp);
+#endif
+                    c1Queue.FreeTensor(cOut);
+                }
+                if (slot == 0) CrossCoreSetFlag<kCrossMode, PIPE_FIX>(kAicToAivFlag0);
+                else           CrossCoreSetFlag<kCrossMode, PIPE_FIX>(kAicToAivFlag1);
+                flushIdx++;
+                } else {
                 {
                     auto aL0p = a2Queue.AllocTensor<int8_t>();
                     auto bL0p = b2Queue.AllocTensor<int8_t>();
@@ -417,10 +701,19 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
 
                     if (sInQ == 0) {
                         cL0 = c1Queue.AllocTensor<int32_t>();
+                        if constexpr (kSplitFlush) {
+                            cL0Lo = c1Queue.AllocTensor<int32_t>();
+                        }
                     }
                     mm.cmatrixInitVal = (sInQ == 0);
                     Mmad(cL0, aL0.ReinterpretCast<int4b_t>(),
                          bL0.ReinterpretCast<int4b_t>(), mm);
+                    if constexpr (kSplitFlush) {
+                        // Same B slice, the other half of the same A slice: no
+                        // extra L1->L0 traffic, only a second Mmad issue.
+                        Mmad(cL0Lo, aL0[kLoPlaneL0AOff].ReinterpretCast<int4b_t>(),
+                             bL0.ReinterpretCast<int4b_t>(), mm);
+                    }
 
                     a2Queue.FreeTensor(aL0);
                     b2Queue.FreeTensor(bL0);
@@ -437,20 +730,41 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
                             if (slot == 0) CrossCoreWaitFlag(kAivToAicFlag0);
                             else           CrossCoreWaitFlag(kAivToAicFlag1);
                         }
-                        Fixpipe<int32_t, int32_t, CFG_ROW_MAJOR>(
+#if ABLATE_AIC_CFG < 1
+                        Fixpipe<WsElem, int32_t, CFG_ROW_MAJOR>(
                             wsGm[slot * kWsElems], cOut, fp);
+#endif
                         c1Queue.FreeTensor(cOut);
+                        // The lo plane goes to the SAME slot, at the same rows
+                        // the AIV already reads it from (rowOffLo below), so the
+                        // slot's bytes are identical to the unsplit build.  The
+                        // credit above covers the whole slot: one AicToAiv flag
+                        // per quant group, set only after both halves land.
+                        if constexpr (kSplitFlush) {
+                            c1Queue.EnQue(cL0Lo);
+                            auto cOutLo = c1Queue.DeQue<int32_t>();
+#if ABLATE_AIC_CFG < 1
+                            Fixpipe<WsElem, int32_t, CFG_ROW_MAJOR>(
+                                wsGm[slot * kWsElems + TILE_M * TILE_N], cOutLo, fp);
+#endif
+                            c1Queue.FreeTensor(cOutLo);
+                        }
                         if (slot == 0) CrossCoreSetFlag<kCrossMode, PIPE_FIX>(kAicToAivFlag0);
                         else           CrossCoreSetFlag<kCrossMode, PIPE_FIX>(kAicToAivFlag1);
                         flushIdx++;
                     }
                 }
+                }  // else (not kSplitTwoPass)
+#endif  // ABLATE_AIC_CFG >= 2
             }
 
             const uint32_t nextTileId = tileId + blockDim;
             if (nextTileId < numTiles) {
-                const uint32_t nextMTile = nextTileId / numNTiles;
-                const uint32_t nextNTile = nextTileId % numNTiles;
+                // MUST use the same mapping as the main loop, or the
+                // prefetched g0 slab belongs to a different (m, n).
+                uint32_t nextMTile, nextNTile;
+                TileToMN(nextTileId, superN, numFullBands, fullBandTiles, remN,
+                         nextMTile, nextNTile);
                 IssueGroupLoad(a1Queue, b1Queue, aHiGm, aLoGm, bGm, ndA, ndB,
                                (uint64_t)nextMTile * TILE_M * Kb,
                                (uint64_t)nextNTile * TILE_N * Kb, 0, g0Slices);
@@ -468,6 +782,22 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
 
     // ============================ AIV ============================
     if ASCEND_IS_AIV {
+#if ABLATE_AIV_CFG
+        // Handshake only -- same number of flushes, same flag order, same slot
+        // alternation as the real AIV, so the AIC's accounting is untouched.
+        // Everything else (scale staging, wsGm read-back, combine, store) is gone.
+        uint32_t flushIdx = 0;
+        for (uint32_t tileId = blockIdx; tileId < numTiles; tileId += blockDim) {
+            for (uint32_t g = 0; g < numQGroups; g++) {
+                const uint32_t slot = flushIdx & 1u;
+                if (slot == 0) CrossCoreWaitFlag(kAicToAivFlag0);
+                else           CrossCoreWaitFlag(kAicToAivFlag1);
+                if (slot == 0) CrossCoreSetFlag<kCrossMode, PIPE_MTE2>(kAivToAicFlag0);
+                else           CrossCoreSetFlag<kCrossMode, PIPE_MTE2>(kAivToAicFlag1);
+                flushIdx++;
+            }
+        }
+#else
         const uint32_t subIdx = static_cast<uint32_t>(GetSubBlockIdx());
         const uint32_t mBase  = subIdx * HALF_M;
         constexpr uint32_t myM     = HALF_M;
@@ -489,14 +819,17 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
                                     (uint64_t)numQGroups * M);
         }
 
-        TBuf<QuePosition::VECCALC> ubHiBuf, ubLoBuf, ubTempBuf, ubAccBuf, ubOutBuf;
+        TBuf<QuePosition::VECCALC> ubHiBuf, ubLoBuf, ubTempBuf, ubTemp2Buf, ubAccBuf, ubOutBuf;
         TBuf<QuePosition::VECCALC> ubWsBf16Buf, ubAsBf16Buf, ubKsI32Buf;
         TBuf<QuePosition::VECCALC> ubWsF32Buf, ubKsF32Buf, ubAsF32Buf, ubRowScaleBuf;
         TBuf<QuePosition::VECCALC> ubWzBf16Buf, ubAkI32Buf, ubWzF32Buf, ubAkF32Buf, ubAkBrcbBuf;
 
-        pipe.InitBuffer(ubHiBuf,       myElems * sizeof(int32_t));
-        pipe.InitBuffer(ubLoBuf,       myElems * sizeof(int32_t));
+        pipe.InitBuffer(ubHiBuf,       myElems * sizeof(WsElem));
+        pipe.InitBuffer(ubLoBuf,       myElems * sizeof(WsElem));
         pipe.InitBuffer(ubTempBuf,     myElems * sizeof(float));
+        // bf16 staging frees exactly the 2*myElems*2 B this second fp32 scratch
+        // needs, so the UB budget is unchanged.
+        pipe.InitBuffer(ubTemp2Buf,    kBf16Flush ? myElems * sizeof(float) : 32);
         pipe.InitBuffer(ubAccBuf,      myElems * sizeof(float));
         pipe.InitBuffer(ubOutBuf,      myElems * sizeof(bfloat16_t));
         pipe.InitBuffer(ubWsBf16Buf,   BATCH_G * TILE_N * sizeof(bfloat16_t));
@@ -514,9 +847,10 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
             pipe.InitBuffer(ubAkBrcbBuf, BATCH_G * myM * 8 * sizeof(float));
         }
 
-        auto ubHi       = ubHiBuf.Get<int32_t>();
-        auto ubLo       = ubLoBuf.Get<int32_t>();
+        auto ubHi       = ubHiBuf.Get<WsElem>();
+        auto ubLo       = ubLoBuf.Get<WsElem>();
         auto ubTemp     = ubTempBuf.Get<float>();
+        auto ubTemp2    = ubTemp2Buf.Get<float>();
         auto ubAcc      = ubAccBuf.Get<float>();
         auto ubOut      = ubOutBuf.Get<bfloat16_t>();
         auto ubWsBf16   = ubWsBf16Buf.Get<bfloat16_t>();
@@ -573,8 +907,8 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
         uint32_t flushIdx = 0;          // mirrors the AIC's global flush order
 
         for (uint32_t tileId = blockIdx; tileId < numTiles; tileId += blockDim) {
-            const uint32_t mTile = tileId / numNTiles;
-            const uint32_t nTile = tileId % numNTiles;
+            uint32_t mTile, nTile;
+            TileToMN(tileId, superN, numFullBands, fullBandTiles, remN, mTile, nTile);
             const uint64_t mOff  = (uint64_t)mTile * TILE_M;
             const uint64_t nOff  = (uint64_t)nTile * TILE_N;
 
@@ -669,12 +1003,12 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
                     const uint32_t so = j * TILE_N;
                     const uint32_t ro = j * myM * 8;
                     WaitFlag<HardEvent::MTE2_V>(evMte2V0);
-                    AccumulateGroupChunk(ubHi, ubLo, ubTemp, ubAcc,
+                    AccumulateGroupChunk(ubHi, ubLo, ubTemp, ubTemp2, ubAcc,
                                          ubWsF32[so], ubKsF32[so], ubRowScale[ro],
                                          ubWzF32[so], ubAkBrcb[ro], 0);
                     if constexpr (CHUNKS_PER_AIV > 1) {
                         WaitFlag<HardEvent::MTE2_V>(evMte2V1);
-                        AccumulateGroupChunk(ubHi, ubLo, ubTemp, ubAcc,
+                        AccumulateGroupChunk(ubHi, ubLo, ubTemp, ubTemp2, ubAcc,
                                              ubWsF32[so], ubKsF32[so], ubRowScale[ro],
                                              ubWzF32[so], ubAkBrcb[ro], 1);
                     }
@@ -718,6 +1052,7 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
         SetFlag<HardEvent::MTE3_S>(evMte3S);
         WaitFlag<HardEvent::MTE3_S>(evMte3S);
         pipe.ReleaseEventID<HardEvent::MTE3_S>(evMte3S);
+#endif  // ABLATE_AIV_CFG
     }
 
     pipe.Destroy();
