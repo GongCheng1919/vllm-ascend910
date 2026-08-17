@@ -28,3 +28,5 @@ P0的探针揭示了应用W4A8-mg相比于W8A8-pc和W8A8-mg（这个在nitro中�
 从MGCKPT/P4_E2E.md继续，现在这个性能对比BF16居然只有1.3x，而我们的目标是超越W8A8，有点太离谱了哈，我们现在是否已经做了算子融合和自定一transformer层？还是仅仅做了算子替换？
 
 从MGCKPT/P5_KERNEL_OPT.md 继续，我们接下来干嘛？
+
+从MGCKPT/P6_TP.md继续，我们当前正在推进P6，即在VLLM上部署应用我们的TP和PP的W4A8和W8A8的结果，先复盘当前进展，然后确认当前工作

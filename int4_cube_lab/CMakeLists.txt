@@ -109,3 +109,30 @@ add_op_test(midgroup_w4a8_gemm_m16_g1024_asym_dmaonly_gkb512)
 add_op_test(midgroup_w4a8_gemm_m16_g1024_asym_gkb512)
 add_op_test(midgroup_w4a8_gemm_m16_g1024_asym_dmaonly_gkb1536)
 add_op_test(midgroup_w4a8_gemm_m16_g1024_asym_gkb1536)
+
+# ---------------------------------------------------------------------------
+# P6 (TP): vLLM tensor parallelism splits K on the row-parallel projections.
+# ---------------------------------------------------------------------------
+# P6 A: D9 banding at decode M.  P5 only measured TILE_M=128, but the 32 MB band
+# cap also trips at TILE_M=16/64 for gate_up (N*Kb=141.6 MB) and down (70.8 MB),
+# so banding must be regressed there before it can become the default.
+add_op_test(midgroup_w4a8_gemm_m16_g1024_asym_band)
+add_op_test(midgroup_w4a8_gemm_m64_g1024_asym_band)
+
+# P6 B: asym GK=512/256.  QwQ-32B has K = 2^10 * odd on both row-parallel
+# projections (5120 = 1024*5, 27648 = 1024*27), so K_rank = K/TP divides exactly
+# by GK = 1024/TP at every TP -- no ragged group needed.  The pre-existing
+# g512/g256 builds are SYM; the vLLM path is asym.  nofix twins included so the
+# flush tax is separable at the TP shapes.
+add_op_test(midgroup_w4a8_gemm_m16_g512_asym)
+add_op_test(midgroup_w4a8_gemm_m16_g512_asym_nofix)
+add_op_test(midgroup_w4a8_gemm_m16_g256_asym)
+add_op_test(midgroup_w4a8_gemm_m16_g256_asym_nofix)
+add_op_test(midgroup_w4a8_gemm_m64_g512_asym)
+add_op_test(midgroup_w4a8_gemm_m64_g512_asym_nofix)
+add_op_test(midgroup_w4a8_gemm_m64_g256_asym)
+add_op_test(midgroup_w4a8_gemm_m64_g256_asym_nofix)
+add_op_test(midgroup_w4a8_gemm_m128_g512_asym)
+add_op_test(midgroup_w4a8_gemm_m128_g512_asym_nofix)
+add_op_test(midgroup_w4a8_gemm_m128_g256_asym)
+add_op_test(midgroup_w4a8_gemm_m128_g256_asym_nofix)

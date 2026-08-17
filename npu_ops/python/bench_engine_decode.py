@@ -56,8 +56,32 @@ ARMS = {
 # what lets this script's monkeypatch reach the model.
 os.environ.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
 os.environ.setdefault("VLLM_USE_V1", "1")
+# tp*pp>1 forks workers (VLLM_WORKER_MULTIPROC_METHOD defaults to "fork"), and
+# `MultiprocExecutor` calls `torch.set_num_threads(1)` in the child *only when
+# OMP_NUM_THREADS is unset*.  This parent has already initialised OpenMP, so
+# that post-fork call aborts the worker with "Invalid thread pool!" and the
+# engine never comes up.  Setting it here takes that branch out of play.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+
+def _rank_conversion_stats(worker) -> dict:
+    """Run inside each worker process to report what IT converted.
+
+    Shipped to the workers by `collective_rpc`, so it must import its own
+    dependencies -- the worker got `vllm_engine_patch` onto `sys.path` via the
+    `vllm.general_plugins` entry point in `npu_ops/plugin`.
+    """
+    import os
+    try:
+        import vllm_engine_patch
+        st = vllm_engine_patch.stats()
+    except Exception as e:                            # noqa: BLE001
+        return {"pid": os.getpid(), "arm": f"IMPORT FAILED: {e!r}",
+                "converted": 0, "skipped": 0}
+    return {"pid": os.getpid(), "arm": st.get("arm", "<unpatched>"),
+            "converted": st.get("converted", 0), "skipped": st.get("skipped", 0)}
 
 
 def main() -> int:
@@ -70,13 +94,28 @@ def main() -> int:
                     help="override the arm's default checkpoint")
     ap.add_argument("--layers", type=int, default=8,
                     help="override num_hidden_layers; 0 = keep the real 64")
-    ap.add_argument("--tp", type=int, default=1)
+    ap.add_argument("--tp", type=int, default=1,
+                    help="Tensor parallel size.  WARNING at GK=1024: TP shards "
+                         "the K of row-parallel layers, and o_proj K=5120=5*GK "
+                         "/ down_proj K=27648=27*GK only stay group-aligned for "
+                         "TP dividing 5 and 27 -- i.e. TP=1 only.  Any other TP "
+                         "makes _supported() reject those two layers, which the "
+                         "patch SILENTLY falls back to BF16 (34% of the weights). "
+                         "The script refuses that below rather than report it as "
+                         "a W4A8 number.")
+    ap.add_argument("--pp", type=int, default=1,
+                    help="Pipeline parallel size.  PP splits by LAYER, so every "
+                         "rank keeps a full K and GK=1024 stays aligned -- this "
+                         "is the parallelism that works unchanged.")
     ap.add_argument("--batch", type=int, nargs="+", default=[1])
     ap.add_argument("--prompt-len", type=int, default=128)
     ap.add_argument("--out-len", type=int, default=64)
     ap.add_argument("--eager", action="store_true",
                     help="disable ACL graph (host-bound; see P4 D7)")
     ap.add_argument("--gpu-util", type=float, default=0.85)
+    ap.add_argument("--allow-misaligned-tp", action="store_true",
+                    help="Run a group-misaligned TP anyway, knowingly measuring "
+                         "a mixed W4A8/BF16 model.")
     ap.add_argument("--out", default="")
     ap.add_argument("--profile-dir", default="",
                     help="capture a torch_npu profile of ONE timed generate")
@@ -94,7 +133,33 @@ def main() -> int:
     default_model, quantization, patch_arm = ARMS[args.arm]
     model = args.model or default_model
 
+    # Group-alignment gate.  See --tp help: a misaligned TP does not fail, it
+    # silently leaves o_proj/down_proj in BF16, so the arm stops being W4A8.
+    if patch_arm == "w4a8" and args.tp > 1 and not args.allow_misaligned_tp:
+        import json as _json
+        cfg = _json.load(open(os.path.join(model, "config.json")))
+        bad = [(nm, k) for nm, k in (("o_proj", cfg["hidden_size"]),
+                                     ("down_proj", cfg["intermediate_size"]))
+               if (k // args.tp) % 1024]
+        if bad:
+            print(f"[bench] REFUSING tp={args.tp}: " + ", ".join(
+                f"{nm} K={k} -> shard {k // args.tp} not a multiple of GK=1024"
+                for nm, k in bad))
+            print("[bench] those layers would silently stay BF16 (34% of the "
+                  "weights), so the result would not be a W4A8 number.")
+            print("[bench] use --pp instead, or GK=256, or "
+                  "--allow-misaligned-tp to measure the mixed arm on purpose.")
+            return 2
+
+    multi_rank = args.tp * args.pp > 1
     if patch_arm:
+        # TP/PP > 1 spawns worker PROCESSES; a parent-process monkeypatch never
+        # reaches them (PP4 came up clean with converted=0 on 2026-08-15).  The
+        # vllm.general_plugins entry point installed by npu_ops/plugin runs in
+        # every vLLM process, so hand the arm over through the environment and
+        # let each worker arm itself.
+        os.environ["MIDGROUP_ARM"] = patch_arm
+        os.environ["MIDGROUP_OPS_PATH"] = os.path.dirname(os.path.abspath(__file__))
         import vllm_engine_patch
         vllm_engine_patch.patch_unquantized_linear(arm=patch_arm)
 
@@ -117,6 +182,7 @@ def main() -> int:
     llm = LLM(
         model=model,
         tensor_parallel_size=args.tp,
+        pipeline_parallel_size=args.pp,
         load_format="dummy",
         hf_overrides=overrides or None,
         max_model_len=args.prompt_len + args.out_len + 16,
@@ -128,7 +194,7 @@ def main() -> int:
     )
     t_load = time.perf_counter() - t0
     print(f"[bench] engine up in {t_load:.1f}s  arm={args.arm} model={model} "
-          f"layers={args.layers or 64} tp={args.tp} "
+          f"layers={args.layers or 64} tp={args.tp} pp={args.pp} "
           f"graph={'off' if args.eager else 'on'}"
           f"{' mode=' + args.cudagraph_mode if args.cudagraph_mode else ''}")
 
@@ -138,7 +204,24 @@ def main() -> int:
               f"quantise_time={st.get('t', 0):.0f}s")
         for n in st.get("names", []):
             print(f"[bench]   e.g. {n}")
-        if not st.get("converted"):
+        if multi_rank:
+            # The model lives in the worker processes, so the parent's counters
+            # stay at zero and say nothing.  Do NOT fall back to reading the
+            # workers' log lines: `[midgroup] N converted` only prints every 64
+            # conversions, and a short `--layers` run never reaches 64, so its
+            # absence is not evidence.  That is precisely how PP4 was first
+            # measured as a BF16 run (2026-08-15).  Ask every rank directly.
+            per_rank = llm.collective_rpc(_rank_conversion_stats)
+            for r, s in enumerate(per_rank):
+                print(f"[bench] rank {r}: pid={s['pid']} arm={s['arm']} "
+                      f"converted={s['converted']} skipped={s['skipped']}")
+            dead = [r for r, s in enumerate(per_rank) if not s["converted"]]
+            if dead:
+                print(f"[bench] ERROR: ranks {dead} converted nothing -- those "
+                      "ranks' layers ran in BF16, so this is not a "
+                      f"{patch_arm} number")
+                return 2
+        elif not st.get("converted"):
             print("[bench] ERROR: nothing converted -- the arm is a BF16 run")
             return 2
 
@@ -174,13 +257,15 @@ def main() -> int:
                 # `cudagraph_mode` is NOT optional bookkeeping: the same kernels
                 # measure 1.41x under the vllm-ascend default PIECEWISE and
                 # 2.78x under FULL_DECODE_ONLY.  A row without it is unreadable.
-                f.write("arm,layers,tp,graph,cudagraph_mode,batch,total_s,"
-                        "gen_tok,step_us,per_layer_us\n")
+                f.write("arm,layers,tp,pp,graph,cudagraph_mode,batch,"
+                        "prompt_len,out_len,total_s,gen_tok,step_us,"
+                        "per_layer_us,throughput_tok_s\n")
             mode = args.cudagraph_mode or "PIECEWISE(default)"
             for b, dt, gen, ps, pl in rows:
-                f.write(f"{args.arm},{n_layers},{args.tp},"
+                f.write(f"{args.arm},{n_layers},{args.tp},{args.pp},"
                         f"{'eager' if args.eager else 'aclgraph'},{mode},{b},"
-                        f"{dt:.4f},{gen},{ps:.2f},{pl:.3f}\n")
+                        f"{args.prompt_len},{args.out_len},"
+                        f"{dt:.4f},{gen},{ps:.2f},{pl:.3f},{gen / dt:.2f}\n")
         print(f"[bench] appended to {args.out}")
     return 0
 
