@@ -84,6 +84,24 @@ def _rank_conversion_stats(worker) -> dict:
             "converted": st.get("converted", 0), "skipped": st.get("skipped", 0)}
 
 
+def _quant_methods(model) -> dict:
+    """Count each Linear's quant_method class.  Runs per rank via apply_model.
+
+    This is the ONE evidence line that works for all five arms.  The
+    `converted=` counters only exist for the two arms that go through our
+    patch; the `-native` arms are quantised by vllm-ascend from the vendor
+    checkpoint, so without this a silently-BF16 native arm would look exactly
+    like a working one -- the same failure mode as P6 D8, just one layer over.
+    """
+    from collections import Counter
+    from vllm.model_executor.layers.linear import LinearBase
+    c: Counter = Counter()
+    for _, m in model.named_modules():
+        if isinstance(m, LinearBase):
+            c[type(getattr(m, "quant_method", None)).__name__] += 1
+    return dict(c)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--arm", choices=list(ARMS), default="w4a8",
@@ -108,7 +126,19 @@ def main() -> int:
                          "rank keeps a full K and GK=1024 stays aligned -- this "
                          "is the parallelism that works unchanged.")
     ap.add_argument("--batch", type=int, nargs="+", default=[1])
-    ap.add_argument("--prompt-len", type=int, default=128)
+    ap.add_argument("--prompt-len", type=int, nargs="+", default=[128],
+                    help="one or more prompt lengths, swept inside ONE engine "
+                         "(long-context sweeps otherwise pay a fresh engine "
+                         "start per point).  max_model_len is sized from the "
+                         "largest.")
+    ap.add_argument("--prefill-probe", action="store_true",
+                    help="also time prefill.  The normal `step_us` warms up on "
+                         "the SAME prompts it then times, and prefix caching is "
+                         "on, so the timed pass reuses the prefix KV and pays "
+                         "almost no prefill -- deliberately, since that isolates "
+                         "decode with a long KV.  This flag adds a separate "
+                         "max_tokens=1 pass over UNSEEN prompts, which is where "
+                         "the prefill (large-M GEMM) cost actually shows up.")
     ap.add_argument("--out-len", type=int, default=64)
     ap.add_argument("--eager", action="store_true",
                     help="disable ACL graph (host-bound; see P4 D7)")
@@ -185,7 +215,7 @@ def main() -> int:
         pipeline_parallel_size=args.pp,
         load_format="dummy",
         hf_overrides=overrides or None,
-        max_model_len=args.prompt_len + args.out_len + 16,
+        max_model_len=max(args.prompt_len) + args.out_len + 16,
         gpu_memory_utilization=args.gpu_util,
         enforce_eager=args.eager,
         dtype="bfloat16",
@@ -225,11 +255,24 @@ def main() -> int:
             print("[bench] ERROR: nothing converted -- the arm is a BF16 run")
             return 2
 
+    # Works for every arm, including the two `-native` ones that our patch never
+    # touches.  An arm whose linears all report UnquantizedLinearMethod is a
+    # BF16 run wearing the arm's name.
+    try:
+        for r, qm in enumerate(llm.apply_model(_quant_methods)):
+            print(f"[bench] rank {r} quant_methods: {qm}")
+    except Exception as e:                                # noqa: BLE001
+        print(f"[bench] WARNING: could not read quant_methods: {e!r}")
+
     rows = []
     n_layers = args.layers or 64
-    for b in args.batch:
-        # Distinct prompts so the scheduler cannot dedupe or prefix-cache them.
-        prompts = [f"{i} " + "word " * (args.prompt_len - 2) for i in range(b)]
+    for plen in args.prompt_len:
+      for b in args.batch:
+        # Distinct prompts so the scheduler cannot dedupe them.  They ARE
+        # prefix-cached between the warmup and the timed pass, on purpose: it
+        # makes `step_us` a decode measurement even at plen=8192.  Prefill is
+        # measured separately by --prefill-probe.
+        prompts = [f"{plen}_{i} " + "word " * (plen - 2) for i in range(b)]
         sp = SamplingParams(temperature=0.0, max_tokens=args.out_len,
                             ignore_eos=True)
         llm.generate(prompts, sp)                      # warm up + capture
@@ -241,14 +284,27 @@ def main() -> int:
         if args.profile_dir:
             llm.stop_profile()
 
+        prefill_ms = ""
+        if args.prefill_probe:
+            # UNSEEN prompts (different leading token => different prefix hash),
+            # one output token: this pass pays the prefill the timed pass above
+            # deliberately skips.
+            fresh = [f"probe{plen}_{b}_{i} " + "word " * (plen - 2)
+                     for i in range(b)]
+            sp1 = SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True)
+            t1 = time.perf_counter()
+            llm.generate(fresh, sp1)
+            prefill_ms = f"{(time.perf_counter() - t1) * 1e3:.2f}"
+
         gen = sum(len(o.outputs[0].token_ids) for o in outs)
         per_step = dt / args.out_len * 1e6              # us per decode step
         per_layer = per_step / n_layers
-        print(f"[bench] batch={b:4d}  total={dt * 1e3:8.1f} ms  "
+        print(f"[bench] plen={plen:6d} batch={b:4d}  total={dt * 1e3:8.1f} ms  "
               f"gen={gen} tok  step={per_step:8.1f} us  "
               f"per-layer={per_layer:7.1f} us  "
-              f"throughput={gen / dt:7.1f} tok/s")
-        rows.append((b, dt, gen, per_step, per_layer))
+              f"throughput={gen / dt:7.1f} tok/s"
+              + (f"  prefill={prefill_ms} ms" if prefill_ms else ""))
+        rows.append((plen, b, dt, gen, per_step, per_layer, prefill_ms))
 
     if args.out:
         new = not os.path.exists(args.out)
@@ -259,13 +315,13 @@ def main() -> int:
                 # 2.78x under FULL_DECODE_ONLY.  A row without it is unreadable.
                 f.write("arm,layers,tp,pp,graph,cudagraph_mode,batch,"
                         "prompt_len,out_len,total_s,gen_tok,step_us,"
-                        "per_layer_us,throughput_tok_s\n")
+                        "per_layer_us,throughput_tok_s,prefill_ms\n")
             mode = args.cudagraph_mode or "PIECEWISE(default)"
-            for b, dt, gen, ps, pl in rows:
+            for plen, b, dt, gen, ps, pl, pf in rows:
                 f.write(f"{args.arm},{n_layers},{args.tp},{args.pp},"
                         f"{'eager' if args.eager else 'aclgraph'},{mode},{b},"
-                        f"{args.prompt_len},{args.out_len},"
-                        f"{dt:.4f},{gen},{ps:.2f},{pl:.3f},{gen / dt:.2f}\n")
+                        f"{plen},{args.out_len},"
+                        f"{dt:.4f},{gen},{ps:.2f},{pl:.3f},{gen / dt:.2f},{pf}\n")
         print(f"[bench] appended to {args.out}")
     return 0
 

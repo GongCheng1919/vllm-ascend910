@@ -63,7 +63,7 @@ for pp in $PPS; do
         }
       # Exit 2 from the bench means some rank converted nothing, so reaching
       # here proves every rank really runs the arm.
-      grep -E "^\[bench\] (rank|batch)" "$LOG" | tail -n $(( $(echo "$BATCHES" | wc -w) + pp ))
+      grep -E "^\[bench\] (rank|plen)" "$LOG" | tail -n $(( $(echo "$BATCHES" | wc -w) + pp ))
     done
   done
 done
