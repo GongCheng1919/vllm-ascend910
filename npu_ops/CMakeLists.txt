@@ -49,6 +49,16 @@ endforeach()
 ascendc_library(midgroup_quant_a_g1024_kernel STATIC ${_KDIR}/midgroup_quant_a_g1024.cpp)
 list(APPEND _KERNEL_LIBS midgroup_quant_a_g1024_kernel)
 
+# Cross-rank probe (P6.5 D15): reads peer HBM directly, no HCCL of any kind.
+# Gates the fused GEMM + all-reduce line -- see host/peer_read_sum.cpp.
+ascendc_library(peer_read_sum_f32_kernel STATIC ${_KDIR}/peer_read_sum_f32.cpp)
+list(APPEND _KERNEL_LIBS peer_read_sum_f32_kernel)
+
+# Same idea with the barrier moved INSIDE the kernel, which is what a captured
+# decode graph needs (no host-side collective allowed).  See D17.
+ascendc_library(peer_allreduce_f32_kernel STATIC ${_KDIR}/peer_allreduce_f32.cpp)
+list(APPEND _KERNEL_LIBS peer_allreduce_f32_kernel)
+
 file(GLOB _HOST_SRCS ${CMAKE_CURRENT_LIST_DIR}/host/*.cpp)
 add_library(${_LIB_NAME} SHARED ${_HOST_SRCS})
 

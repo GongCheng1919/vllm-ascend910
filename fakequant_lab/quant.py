@@ -105,10 +105,30 @@ def group_params(xg: torch.Tensor, bits: int, sym: bool
         return scale, None
     mx = xg.amax(dim=-1, keepdim=True)
     mn = xg.amin(dim=-1, keepdim=True)
-    scale = _tiny_where_zero(((mx - mn) / (qmax - qmin)).to(torch.bfloat16))
+    rng = mx - mn
+    scale = _tiny_where_zero((rng / (qmax - qmin)).to(torch.bfloat16))
     # Put the code range at [qmin, qmax] so int4 still stores as signed
     # nibbles: x ~ scale*(q - zero), zero = qmin - round(mn/scale).
     zero = (float(qmin) - torch.round(mn / scale.float())).to(torch.bfloat16)
+
+    # CONSTANT group (mx == mn): there is no range to spread, and the formula
+    # above degenerates catastrophically -- `_tiny_where_zero` floors the scale at
+    # bf16-tiny but then `round(mn/tiny)` makes |zero| ~1e35, which stays finite in
+    # bf16 and only explodes later, in the kernel's rank-1 term `wz * a_ksum`
+    # (|a_ksum| ~1e5 => inf in fp32).  The guard was half-applied: it protected the
+    # scale and left the zero point to blow up.
+    #
+    # For a constant group `scale = |v|/qmax, zero = 0` is EXACT: q = round(v/scale)
+    # = +/-qmax and dequant returns v.  Only reachable when a group is constant,
+    # which for a 1024-element weight group never happens in practice -- but a
+    # RAGGED last group can hold a single element, where it always happens.  So
+    # this changes nothing P2 measured and fixes every ragged K whose last group
+    # has one member (K=1025, K=5121, ...).
+    const = (rng == 0)
+    scale = torch.where(const,
+                        _tiny_where_zero((mx.abs() / qmax).to(torch.bfloat16)),
+                        scale)
+    zero = torch.where(const, torch.zeros_like(zero), zero)
     return scale, zero
 
 

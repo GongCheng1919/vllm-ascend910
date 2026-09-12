@@ -1,0 +1,526 @@
+<title>Qwen3.8-27B 单卡量化部署</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root{
+  --ground:#F2F5F5; --surface:#FFFFFF; --surface-2:#EAF0F0;
+  --ink:#0F1719; --ink-2:#46595F; --muted:#7D9098; --line:#DBE4E5;
+  --accent:#0F6E6B; --accent-soft:#E1EFEE;
+  --warn:#8A5510;  --warn-soft:#F5EADB;
+  --alert:#9E2B2B; --alert-soft:#F6E2E2;
+  --serif:"Noto Serif SC",Songti SC,SimSun,Georgia,serif;
+  --sans:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0C1315; --surface:#131C1F; --surface-2:#182327;
+    --ink:#E6EEEF; --ink-2:#A8BCC2; --muted:#7B9199; --line:#223034;
+    --accent:#4BBDB4; --accent-soft:#12302E;
+    --warn:#D9A45E;  --warn-soft:#2C2317;
+    --alert:#E58585; --alert-soft:#2E1B1B;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0C1315; --surface:#131C1F; --surface-2:#182327;
+  --ink:#E6EEEF; --ink-2:#A8BCC2; --muted:#7B9199; --line:#223034;
+  --accent:#4BBDB4; --accent-soft:#12302E;
+  --warn:#D9A45E;  --warn-soft:#2C2317;
+  --alert:#E58585; --alert-soft:#2E1B1B;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
+     font-size:16px;line-height:1.75;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1000px;margin:0 auto;padding:0 28px 96px}
+
+/* ---- header ---- */
+header{padding:64px 0 40px;border-bottom:2px solid var(--ink)}
+.kicker{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+        color:var(--accent);margin-bottom:18px}
+h1{font-family:var(--serif);font-weight:700;font-size:clamp(30px,5vw,46px);line-height:1.2;
+   margin:0;letter-spacing:-.01em;text-wrap:balance}
+.thesis{margin:20px 0 0;max-width:60ch;font-size:18px;color:var(--ink-2);line-height:1.65}
+.strip{display:flex;flex-wrap:wrap;gap:10px 26px;margin-top:28px;font-family:var(--mono);
+       font-size:12.5px;color:var(--muted)}
+.strip b{color:var(--ink-2);font-weight:600}
+
+/* ---- evidence chips: the structural spine of this report ---- */
+.chip{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:600;
+      letter-spacing:.06em;padding:2px 8px;border-radius:2px;white-space:nowrap;
+      vertical-align:2px}
+.c-meas{background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent)}
+.c-calc{background:var(--warn-soft);color:var(--warn);border:1px solid var(--warn)}
+.c-none{background:var(--alert-soft);color:var(--alert);border:1px solid var(--alert)}
+.legend{display:flex;flex-wrap:wrap;gap:18px;margin:28px 0 0;padding:16px 20px;
+        background:var(--surface);border:1px solid var(--line);border-radius:3px}
+.legend div{font-size:13.5px;color:var(--ink-2);flex:1;min-width:210px}
+
+/* ---- sections ---- */
+section{margin-top:56px}
+h2{font-family:var(--serif);font-weight:600;font-size:24px;line-height:1.3;margin:0 0 6px;
+   letter-spacing:-.005em;text-wrap:balance}
+h2 .n{font-family:var(--mono);font-size:14px;color:var(--accent);font-weight:600;margin-right:12px}
+.sub{color:var(--muted);font-size:14px;margin:0 0 22px;max-width:62ch}
+p{margin:14px 0;max-width:66ch}
+h3{font-family:var(--sans);font-weight:700;font-size:15.5px;margin:30px 0 8px;color:var(--ink)}
+
+/* ---- tables ---- */
+.tw{overflow-x:auto;margin:18px 0;border:1px solid var(--line);border-radius:3px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:520px}
+caption{caption-side:top;text-align:left;font-size:12.5px;color:var(--muted);
+        padding:12px 16px 0;font-family:var(--mono)}
+th{text-align:left;font-weight:700;font-size:13px;padding:11px 16px;color:var(--ink-2);
+   border-bottom:1.5px solid var(--ink);white-space:nowrap}
+td{padding:10px 16px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.win{color:var(--accent);font-weight:600}
+.lose{color:var(--alert);font-weight:600}
+tbody tr:hover{background:var(--surface-2)}
+
+/* ---- callouts ---- */
+.note{border-left:3px solid var(--accent);background:var(--surface);padding:14px 20px;
+      margin:20px 0;border-radius:0 3px 3px 0}
+.note.w{border-left-color:var(--warn)}
+.note.a{border-left-color:var(--alert)}
+.note .h{display:block;font-weight:700;font-size:14.5px;margin-bottom:4px}
+.note p{margin:6px 0;font-size:14.5px;color:var(--ink-2);max-width:70ch}
+
+code{font-family:var(--mono);font-size:.87em;background:var(--surface-2);padding:1px 5px;
+     border-radius:2px;color:var(--ink)}
+pre{font-family:var(--mono);font-size:12.5px;line-height:1.7;background:var(--surface);
+    border:1px solid var(--line);border-radius:3px;padding:16px 20px;overflow-x:auto;margin:18px 0}
+
+/* ---- KPI row ---- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;
+      background:var(--line);border:1px solid var(--line);border-radius:3px;margin:22px 0}
+.kpi{background:var(--surface);padding:18px 20px}
+.kpi .v{font-family:var(--mono);font-size:27px;font-weight:600;line-height:1.1;
+        font-variant-numeric:tabular-nums;color:var(--accent)}
+.kpi .v.n{color:var(--ink)}
+.kpi .t{font-size:12.5px;color:var(--muted);margin-top:7px;line-height:1.5}
+
+ul{padding-left:20px;max-width:66ch}
+li{margin:9px 0}
+footer{margin-top:72px;padding-top:24px;border-top:1px solid var(--line);
+       font-family:var(--mono);font-size:12px;color:var(--muted)}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="kicker">Ascend 910B4 · vLLM 0.23.0 · CANN 9.1.0</div>
+  <h1>Qwen3.8-27B 单卡量化部署</h1>
+  <p class="thesis">mid-group W4A8（除三类设计内跳过外）已在<b>完整 64 层</b> Qwen3.8-27B
+  单卡上跑通：权重 <b>51.08 → 16.83 GiB（3.03×）</b>，decode 小 batch
+  <b>1.79× / 1.76×</b> 赢 BF16、1.20× 赢我们自己的 W8A8，大 batch 输回 W8A8 ——
+  后者正是成本模型与 MSD 结构预言的，不是新问题。
+  <b>「官方 W8A8 那行怎么读」放在 §05</b> —— 那行用的是我们给的层配置、官方 per-channel 实现。</p>
+  <div class="strip">
+    <span><b>日期</b> 2026-09-05（Phase C 全矩阵交付）</span>
+    <span><b>模型</b> Qwen3.8-27B（qwen3_5，27.3 B，64 层）</span>
+    <span><b>硬件</b> 单张 910B4，60.96 GiB HBM</span>
+    <span><b>阶段</b> P10 · Phase A/B/C</span>
+  </div>
+  <div class="legend">
+    <div><span class="chip c-meas">实测</span> 本机跑出来的数，附配置口径</div>
+    <div><span class="chip c-calc">推算</span> 从架构参数算的，未上机验证</div>
+    <div><span class="chip c-none">未验证</span> 还没有任何证据，不得引用</div>
+  </div>
+</header>
+
+<section>
+  <h2><span class="n">01</span>结论摘要</h2>
+  <p class="sub">七条，按可信度从高到低。所有引擎数字来自同一份 CSV、
+  同一张卡、同一个 session（`int4_cube_lab/results/p10_qwen38_engine.csv`）。</p>
+  <div class="tw"><table>
+    <thead><tr><th style="width:44%">结论</th><th>依据</th><th style="width:96px">证据</th></tr></thead>
+    <tbody>
+    <tr><td><b>64 层单卡权重实测 16.83 GiB</b>（BF16 51.08 GiB，<span class="win">3.03×</span>；
+        vs W8A8 1.67×），与 P10 的推算 17.0 GiB 几乎逐位吻合 —— <b>推算就此转为实测</b>。
+        省下的 34.25 GiB 一比一变成 KV / Mamba state，并发从 <span class="win">10.2× → 100.8×</span></td>
+        <td>64 层真实几何 · TP=1 · dummy 权重 · <code>gpu_memory_utilization=0.95</code></td>
+        <td><span class="chip c-meas">实测</span></td></tr>
+    <tr><td><b>decode 吞吐 b=1/4：我们的 W4A8 赢</b>—— 33.4 / 122.7 tok/s；
+        赢 BF16 <span class="win">1.79× / 1.76×</span>、赢我们 W8A8 1.20×、
+        赢官方 W8A8 1.11× / 1.08×。<b>b≥16 输回 W8A8</b>（0.97×/0.87× 对官方）——
+        MSD 把 int8 A 拆两个 int4 平面、计算量翻倍 ⇒ 大 M 区理论优势归零，<b>预期内</b></td>
+        <td>五条 arm × b∈{1,4,16,32}，同 session 交替</td>
+        <td><span class="chip c-meas">实测</span></td></tr>
+    <tr><td><b>覆盖率取证：四条 arm 的层集合逐字相同</b> 339/123（462 个 Linear）。
+        「W4A8 EXCEPT 三类」= 27 <code>visual.*fc1</code> + 48 <code>in_proj_ba</code> +
+        48 <code>conv1d</code>，全部被 <code>--expect-skip qwen38</code> 逐条认领，零 UNEXPECTED</td>
+        <td>每 arm 逐 rank 普查 <code>quant_method</code> 类名；跳过逐条声明</td>
+        <td><span class="chip c-meas">实测</span></td></tr>
+    <tr><td><b>官方 W8A8 那行的正确读法</b>：它跑的是<b>我们给的层配置</b>（全量化、含
+        <code>down_proj</code>），落在官方 <b>per-channel</b> 实现上；与我们 midgroup
+        实现<b>吞吐只差 8–9%</b>。而 0.13 / QwQ-32B 上厂商官方 W8A8 把
+        <code>down_proj</code> 留在 FLOAT —— <b>per-channel 全量化能否保模型性能是开放问题，
+        mid-group 正是我们敢全量化的理由</b>（这是论证，不是实测，见 §05）</td>
+        <td>合成描述文件对齐我们的 339 层；厂商无 Qwen3.8 W8A8 checkpoint 可下</td>
+        <td><span class="chip c-meas">实测</span>（吞吐）<br><span class="chip c-none">未验证</span>（精度）</td></tr>
+    <tr><td><b>工具链迁移零数值代价</b>：CANN 8.5 → 9.1.0、torch_npu 2.8 → 2.10，
+        算子输出逐位一致；kernel 零改动，67 项门禁全 PASS</td>
+        <td>三个 Qwen3.8 形状 SNR / max err / sum 完全相同</td>
+        <td><span class="chip c-meas">实测</span></td></tr>
+    <tr><td><b>厂商原生 W4A8 在 Qwen3.8 上走不通，且是 weight-only</b>：
+        3-D 输入直接报错、默认图后端编不过（两条都不是我们的代码）。
+        能跑的那格 b=32 只有 273.5 tok/s —— 比厂商自己的 W8A8 慢 2.08×、比我们 W4A8 慢 1.82×</td>
+        <td>weight-only：反量化回 bf16 再 matmul，activation 的 int8 到不了 cube</td>
+        <td><span class="chip c-meas">实测</span></td></tr>
+    <tr><td><b>精度</b></td>
+        <td>所有 arm 都是 <code>load_format=dummy</code> + 无标定；P2 go/no-go 仍挂起；
+            GDN 递归路径误差沿序列累乘是新风险。见 §08</td>
+        <td><span class="chip c-none">未验证</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2><span class="n">02</span>这条 arm 到底覆盖了什么</h2>
+  <p class="sub">口径与取证先于数字。以下覆盖率是<b>逐 rank 主动查询</b>的返回值，
+  不是日志里的计数 —— 项目规矩：日志的缺席、甚至一个计数，都不是证据。</p>
+
+  <h3>运行口径（五条可比的 arm 完全相同，除注明外）</h3>
+  <pre>models/Qwen3.8-27B（真实 64 层几何）· TP=1 · 单张 910B4
+load_format=dummy · dtype=bfloat16 · gpu_memory_utilization=0.95 · max_num_seqs=32
+FULL_DECODE_ONLY · plen=128 / out_len=128 · VLLM_ENABLE_V1_MULTIPROCESSING=0（非默认）
+vllm/vllm-ascend 0.23.0 · torch_npu 2.10.0.post4 · CANN 9.1.0 · ASCEND_RT_VISIBLE_DEVICES=1</pre>
+
+  <h3>覆盖率取证：四条 arm 的层集合逐字相同</h3>
+  <pre>bf16               {'AscendUnquantizedLinearMethod': 462}
+官方 W8A8          {'AscendLinearMethod': 339, 'AscendUnquantizedLinearMethod': 123}
+我们的 W8A8        {'MidGroupLinearMethod': 339, 'AscendUnquantizedLinearMethod': 123}
+我们的 W4A8        {'MidGroupLinearMethod': 339, 'AscendUnquantizedLinearMethod': 123}</pre>
+  <p><b>339/123 完全一致</b> ⇒ 比值隔离的是 GEMM/量化粒度，不是层集合、不是 checkpoint。</p>
+
+  <h3>留在 BF16 的 123 个：全部设计内（这是「EXCEPT」，不是「洞」）</h3>
+  <div class="tw"><table>
+    <thead><tr><th>层</th><th class="num">个数</th><th>形状</th><th>为什么即使形状放开也该留 BF16</th></tr></thead>
+    <tbody>
+    <tr><td><code>visual.*mlp.linear_fc1</code></td><td class="num">27</td>
+        <td class="num">(4304, 1152)</td>
+        <td>K=1152 在收益域 <code>K*</code>（1300–1830）之下，压了不赚</td></tr>
+    <tr><td><code>linear_attn*in_proj_ba</code></td><td class="num">48</td>
+        <td class="num">(96, 5120)</td>
+        <td>GDN <b>递归衰减门</b> —— 量化误差沿序列累乘，本就该留 BF16</td></tr>
+    <tr><td><code>linear_attn*conv1d</code></td><td class="num">48</td>
+        <td class="num">(10240, 1, 4)</td>
+        <td>三维张量，<b>根本不是 GEMM</b>，被 <code>dim()!=2</code> 正确拒绝</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="note"><span class="h">结果的正确读法是「W4A8 EXCEPT 这三类」，每次运行都会把这句话打出来</span>
+    <p>闸门从「计数」升级成了「声明」：调用方给 <code>bench_engine_decode.py --expect-skip qwen38</code>
+    一份 <code>EXPECTED_SKIPS</code>，<b>每一个跳过都必须被某条声明认领，一个认不出来就整轮失败</b>。
+    放行的门槛比拦截的门槛更高 —— 每条声明都必须答得上「为什么即使形状约束解除也该留 BF16」，
+    而不是「它现在过不了形状检查」。</p></div>
+
+  <div class="note w"><span class="h">⚠ 口径声明，引用数字时必须一起写</span>
+    <p><code>VLLM_ENABLE_V1_MULTIPROCESSING=0</code> 是<b>非默认</b>配置（恢复 0.13.0 的
+    in-process 形态，对同口径对比反而是对的）；<code>load_format=dummy</code>；
+    厂商 W4A8 那条还多一个配置差异（§05）。少写一条，数字就会被当成另一个口径下的结论。</p></div>
+</section>
+
+<section>
+  <h2><span class="n">03</span>内存：这才是本方案在 Qwen3.8 上的价值主张</h2>
+  <p class="sub">完整 64 层 · TP=1 · 同一张卡同一配置，只换 arm。</p>
+
+  <div class="kpis">
+    <div class="kpi"><div class="v">16.83<span style="font-size:16px"> GiB</span></div>
+      <div class="t">我们的 W4A8 权重<br>（BF16 51.08 GiB，3.03×）</div></div>
+    <div class="kpi"><div class="v">38.16<span style="font-size:16px"> GiB</span></div>
+      <div class="t">可用 KV cache<br>（BF16 只剩 3.90 GiB）</div></div>
+    <div class="kpi"><div class="v">27,404</div>
+      <div class="t">KV 容量 tokens<br>（BF16 是 2,788，9.8×）</div></div>
+    <div class="kpi"><div class="v n">100.8×</div>
+      <div class="t">最大并发（272 tok/请求）<br>（BF16 是 10.2×）</div></div>
+  </div>
+
+  <div class="tw"><table>
+    <caption>同一张卡、同一份配置，只换 arm</caption>
+    <thead><tr><th>arm</th><th class="num">权重</th><th class="num">可用 KV</th><th class="num">KV 容量</th><th class="num">最大并发(272 tok/请求)</th></tr></thead>
+    <tbody>
+    <tr><td>BF16</td><td class="num">51.08 GiB</td><td class="num">3.90 GiB</td><td class="num">2,788 tok</td><td class="num lose">10.2×</td></tr>
+    <tr><td>官方 W8A8（合成描述）</td><td class="num">28.16 GiB</td><td class="num">26.83 GiB</td><td class="num">19,244 tok</td><td class="num">70.8×</td></tr>
+    <tr><td>我们的 W8A8</td><td class="num">28.14 GiB</td><td class="num">26.84 GiB</td><td class="num">19,244 tok</td><td class="num">70.8×</td></tr>
+    <tr><td>官方 W4A8（合成描述，vision 留 BF16）</td><td class="num">18.20 GiB</td><td class="num">—</td><td class="num">25,704 tok</td><td class="num">94.5×</td></tr>
+    <tr><td><b>我们的 W4A8</b></td><td class="num win">16.83 GiB</td><td class="num win">38.16 GiB</td><td class="num win">27,404 tok</td><td class="num win">100.8×</td></tr>
+    </tbody>
+  </table></div>
+
+  <ul>
+    <li><b>3.03× vs BF16 / 1.67× vs W8A8</b>，与 P10 §2.3 的推算（50.9 → 17.0 GiB）
+        几乎逐位吻合，推算就此转为实测。</li>
+    <li><b>省下的 34.25 GiB 权重一比一变成了 KV / Mamba state</b>（3.90 → 38.16 GiB）。</li>
+    <li><b>BF16 在单卡上不是「慢」，是装不下</b>：<code>max_num_seqs=256</code> 时引擎直接拒绝启动
+        —— <code>exceeds available Mamba cache blocks (41)</code>。48/64 层是 GDN，
+        <b>每条在跑的序列要占一块与长度无关的 Mamba state</b>，所以权重占用直接换算成并发上限
+        （<b>Qwen3.8 特有的新约束，QwQ 上不存在</b>）。</li>
+  </ul>
+
+  <div class="note w"><span class="h">⚠ dummy 权重</span>
+    <p>内存形状、算子路径、KV 容量、并发上限都是真的；<b>语言质量不存在</b>。
+    任何精度类结论都不能引用这次运行。</p></div>
+</section>
+
+<section>
+  <h2><span class="n">04</span>吞吐矩阵（tok/s，同卡同 session 同配置）</h2>
+  <p class="sub">五条 arm × b∈{1,4,16,32}。官方 W4A8 ‡ 带一条不同配置，只能定性读。</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>arm</th><th class="num">b=1</th><th class="num">b=4</th><th class="num">b=16</th><th class="num">b=32</th></tr></thead>
+    <tbody>
+    <tr><td>BF16</td><td class="num">18.7</td><td class="num">69.9</td><td class="num lose">50.6 ⚠</td><td class="num lose">38.8 ⚠</td></tr>
+    <tr><td>官方 W8A8</td><td class="num">30.2</td><td class="num">113.1</td><td class="num win">366.0</td><td class="num win">568.9</td></tr>
+    <tr><td>我们的 W8A8</td><td class="num">27.8</td><td class="num">102.6</td><td class="num">339.1</td><td class="num">537.5</td></tr>
+    <tr><td><b>我们的 W4A8</b></td><td class="num win">33.4</td><td class="num win">122.7</td><td class="num">354.1</td><td class="num">497.3</td></tr>
+    <tr><td>官方 W4A8 ‡</td><td class="num">29.8</td><td class="num">102.7</td><td class="num">265.2</td><td class="num lose">273.5</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>⚠ <b>BF16 在 b≥16 的两格不是速度，是容量</b>：2,788 token 的 KV 装不下 16×256，
+  调度器开始抢占重算，step 从 57 ms 跳到 316 ms。
+  <b>不要把 7.0× / 12.8× 当成 GEMM 加速比引用</b>，那是「BF16 单卡塞不下」的另一种说法。</p>
+
+  <h3>可以引用的比值（b=1/4，KV 都没打满）</h3>
+  <div class="tw"><table>
+    <thead><tr><th>对比</th><th class="num">b=1</th><th class="num">b=4</th></tr></thead>
+    <tbody>
+    <tr><td>我们的 W4A8 vs BF16</td><td class="num win">1.79×</td><td class="num win">1.76×</td></tr>
+    <tr><td>我们的 W4A8 vs 我们的 W8A8</td><td class="num win">1.20×</td><td class="num win">1.20×</td></tr>
+    <tr><td>我们的 W4A8 vs 官方 W8A8</td><td class="num win">1.11×</td><td class="num win">1.08×</td></tr>
+    <tr><td>我们的 W8A8 vs 官方 W8A8</td><td class="num">0.92×</td><td class="num">0.91×</td></tr>
+    </tbody>
+  </table></div>
+
+  <p><b>b=16/32 上 W4A8 输给 W8A8</b>（0.97× / 0.87× 对官方，1.04× / 0.93× 对我们自己）。
+  这是预期内的：MSD 把 int8 A 拆成两个 int4 平面，计算量翻倍，
+  所以在计算受限区（大 M）W4A8 的理论优势归零（见 <code>w4a8-win-region-small-m-large-k</code>）。
+  <b>W4A8 的收益域是小 M + 大 K，而单卡 Qwen3.8 的部署形态正好在那里。</b></p>
+
+  <div class="note w"><span class="h">⚠ 官方 W4A8 ‡ 为什么只能定性读</span>
+    <p>这条 arm 必须关掉 <code>npugraph_ex</code> 才起得来（§05），而另外四条都开着；
+    且它的 vision 塔留在 BF16。它唯一站得住的结论是<b>厂商 W4A8 是 weight-only</b>
+    （反量化回 bf16 再做 matmul，activation 的 int8 根本到不了 cube），
+    所以在大 batch 掉得比谁都快：b=32 只有 273.5 tok/s，比同版本的厂商自己的 W8A8（568.9）
+    慢 <b>2.08×</b>，也比我们的 W4A8（497.3）慢 1.82×。
+    P4 在 QwQ 上的判断在 Qwen3.8 上原样复现，换到 0.23.0 也没变。</p></div>
+</section>
+
+<section>
+  <h2><span class="n">05</span>官方 arm 是怎么来的，以及那两行 W8A8 该怎么读</h2>
+  <p class="sub">主管方要看「跟官方实现同路对比」。没有官方 checkpoint，就合成描述文件 ——
+  但<b>合成出来的官方 arm 和我们以为的「厂商出货版」不是一回事</b>，这一节把差别说清。</p>
+
+  <h3>模型侧事实：Qwen3.8-27B 没有厂商量化 checkpoint</h3>
+  <p>ModelScope 实测：只有 <code>Qwen/Qwen3.8-27B</code>（BF16）和 GGUF；
+  <code>&lt;org&gt;/Qwen3.8-27B-W8A8</code> 形状的 id 全部 404。
+  P10 早先写的「A2 上有官方 W8A8」是错的，实际两个 <code>-native</code> arm 都没有权重。
+  但 vllm-ascend 打算支持它：<code>packed_modules_model_mapping</code> 里
+  <code>model_type "qwen3_5"</code> 有条目。缺的只是标定权重 —— 而本矩阵所有 arm 都是
+  <code>load_format=dummy</code>，<b>没有任何 arm 声称精度</b>。
+  所以合成一份 <code>quant_model_description.json</code>（<code>npu_ops/python/gen_vendor_quant_desc.py</code>）
+  就够让 vLLM 分配 int8/int4 参数并派发厂商 kernel。</p>
+
+  <h3>读法 1：官方 W8A8 那行 = 我们给的层配置 × 官方 per-channel 实现</h3>
+  <div class="note"><span class="h">「官方 W8A8」用的是我们的 339 层（含 down_proj），跑的是官方实现 —— 两件要分开说</span>
+    <p><b>层配置是我们的</b>：合成文件刻意把层集合对齐我们的 339，比值才隔离出 GEMM。
+    官方实现本身是 <b>per-channel</b>，我们是 <b>mid-group</b>（按组取 scale）。</p>
+    <p>结果：<b>吞吐其实差得不算太多</b> —— 我们的 W8A8 对官方 W8A8 是 0.92× / 0.91×
+    （b=1/4），慢 8–9%，换来的是每输出通道内按组量化、误差粒度细得多。</p></div>
+
+  <h3>读法 2：上一轮厂商自己都不敢把 down_proj 量化掉</h3>
+  <div class="note.w"><span class="h">0.13 / QwQ-32B 的官方 W8A8：down_proj 是没量化的 float</span>
+    <p>在 QwQ-32B（vllm-ascend 0.13）上，厂商官方 W8A8 的 <b>所有 <code>down_proj</code>
+    都留在 FLOAT</b>。那是他们的标定决策 —— 而 <code>down_proj</code> 恰好是 per-channel
+    最难压的地方（K 巨大、fan-in 极宽：QwQ 的 27648 / Qwen3.8 的 17408）。</p>
+    <p>我们这次自定义 config <b>就全量化了</b>，包括 <code>down_proj</code>。
+    敢这么做靠的是粒度：mid-group 在通道内再分组取 scale，per-channel 做不到的精度它做得到。
+    ⇒ <b>per-channel 全量化可能不能很好地保持模型性能，而我们的 midgroup 应该可以。</b></p>
+    <p>⚠ 这句话是<b>论证，不是实测</b>：本矩阵全是 dummy 权重、没有任何精度数字。
+    它的证据链是「厂商在 per-channel 下宁肯留 float 也不量化 down_proj」+
+    「group 粒度误差小于 channel 粒度」。把这条转成实测是下一期的精度关（§08）。</p></div>
+
+  <div class="note a"><span class="h">⚠ 别把合成 arm 当成「厂商出货的那一版」</span>
+    <p>真实厂商版会在层集合上不同 —— QwQ 上他们把 <code>down_proj</code> 留在 FLOAT，
+    那是标定决策，合成文件复现不了。也就是说：<b>表里官方 W8A8 的 339 全量化，
+    是一个比厂商自己敢发的更激进的版本</b> —— 官方实现 + 我们的激进层集合。
+    速度行可比（都是同一层集合上的 kernel 对比）；「厂商出货版到底多快、精度如何」不在本表里。</p></div>
+
+  <h3>厂商原生 W4A8 在 Qwen3.8 上两次撞墙（都不是我们的代码）</h3>
+  <ol>
+    <li><b>不吃 3 维输入</b>：vision 塔的 <code>attn.qkv</code> 传进 3-D x，
+        <code>AscendW4A8DynamicLinearMethod.apply</code> 不做 flatten ⇒
+        <code>AclNN_Parameter_Error(EZ1001): x's dim should be in range [2, 2]. actual is [3]</code>
+        （厂商自己的 <code>W8A8_DYNAMIC</code> 有对应的 squeeze，所以 W8A8 没事）
+        ⇒ 只能把整个 vision 塔留 BF16，权重 18.20 GiB 比我们的 16.83 GiB 大。</li>
+    <li><b>进不了 FULL_DECODE_ONLY 图</b>：<code>'CompilerConfig' object has no attribute
+        'experimental_config'</code>（torch_npu <code>npugraph_ex</code> ← vllm_ascend
+        <code>compiler_interface.patched_get_compiled_gm</code>），而 bf16 与 W8A8_DYNAMIC
+        同配置编得过。绕法是
+        <code>--additional-config '{"ascend_compilation_config": {"enable_npugraph_ex": false}}'</code>。</li>
+  </ol>
+  <p>⇒ 两条加起来：在 0.23.0 + torch_npu 2.10 上，<b>厂商 W4A8 路径在 Qwen3.8-27B
+  这个多模态 + GDN 架构上是走不通的</b>（3-D 输入直接报错、默认图后端编不过）。
+  这不是「慢」，是「跑不了」。我们的路径两条都不撞：<code>MidGroupW4A8Linear</code>
+  一开始就 flatten，kernel 也不经过 npugraph_ex 的那条特殊路径。</p>
+  <p>⚠ 同一个坑我们自己踩了一半：<code>W8A8Linear.__call__</code> 原本直接把 x 喂给
+  <code>npu_dynamic_quant</code>，3-D x 会让 pertoken_scale 变成 2-D，
+  <code>aclnnQuantMatmulV5</code> 报 <code>EZ0013 ... must be 1D</code> ——
+  64 层 W8A8 arm 第一次直接跑挂。QwQ 的每个 Linear 都是 2-D，这个 bug 藏了整整六期。
+  已按 <code>MidGroupW4A8Linear</code> 的做法改成先 flatten 再 reshape。</p>
+</section>
+
+<section>
+  <h2><span class="n">06</span>算子级收益：GEMM-only 的天花板</h2>
+  <p class="sub">Phase A 扫描（180 行、零 NA），不依赖 vLLM，CANN 8.5 上完成。
+  分母是<b>我们自己的 per-channel W8A8</b>，不是 BF16。
+  <b>这是 GEMM-only 的天花板 —— 引擎级比值只会更低，低多少由 §04 给出。</b></p>
+
+  <div class="tw"><table>
+    <caption>按层数加权的「一层解码全部 Linear」总 GEMM 时间，倍数越大越好</caption>
+    <thead><tr><th>TP</th><th class="num">M=1</th><th class="num">M=2</th><th class="num">M=4</th><th class="num">M=8</th><th class="num">M=16</th><th class="num">M=64</th></tr></thead>
+    <tbody>
+    <tr><td><b>1</b></td><td class="num win">1.49×</td><td class="num win">1.50×</td><td class="num win">1.50×</td><td class="num win">1.49×</td><td class="num win">1.50×</td><td class="num">1.27×</td></tr>
+    <tr><td>2</td><td class="num">1.35×</td><td class="num">1.34×</td><td class="num">1.34×</td><td class="num">1.34×</td><td class="num">1.33×</td><td class="num">1.16×</td></tr>
+    <tr><td>4</td><td class="num">1.18×</td><td class="num">1.19×</td><td class="num">1.20×</td><td class="num">1.19×</td><td class="num">1.22×</td><td class="num">1.08×</td></tr>
+    </tbody>
+  </table></div>
+
+  <p><b>M=1 到 16 完全平</b>（TP=1 是 0.665–0.670）。这直接回答了 MTP 的问题：
+  Qwen3.8 自带一层 MTP draft head，batch=1 的解码实际验证 M=2–4，
+  <b>而把 M 从 1 推到 4 不花我们一分钱</b> —— 引擎级 b=1/4 的 1.20×（§04）接住了这条。</p>
+
+  <h3>成本模型在一个全新模型上独立复现</h3>
+  <p>把耗时拟成 <code>固定开销 + K·斜率</code>，交叉点 <code>K* = 固定差 / 斜率差</code>。
+  此前在 QwQ 上（K∈{640,1280,2560,5120}）拟出 M=16 时 K*=1665；这次换模型、换 K 集合
+  （Qwen3.8 的 K∈{6144,3072,1536}）重拟：</p>
+
+  <div class="tw"><table>
+    <thead><tr><th class="num">M</th><th class="num">斜率比</th><th class="num">固定差</th><th class="num">K*</th></tr></thead>
+    <tbody>
+    <tr><td class="num">1</td><td class="num">0.58</td><td class="num">+3.19 µs</td><td class="num">1723</td></tr>
+    <tr><td class="num">4</td><td class="num">0.53</td><td class="num">+3.72 µs</td><td class="num">1830</td></tr>
+    <tr><td class="num">16</td><td class="num">0.61</td><td class="num">+2.15 µs</td><td class="num">1346</td></tr>
+    <tr><td class="num">64</td><td class="num">0.62</td><td class="num">+5.67 µs</td><td class="num">3050</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>斜率比 0.53–0.62（理论值 0.5），<code>K*</code> 落在 1300–1830。
+  于是 TP=4 时 <code>o_proj</code>/<code>gdn_out</code> 的 K=1536 正好骑在 <code>K*</code> 上
+  —— 实测就是 <span class="lose">1.04–1.09</span>，不多不少。
+  <b>同一个成本模型、不同模型、不同 K 集合，仍然预测得住</b> —— 这比任何单点加速数字都值钱。</p>
+
+  <div class="note w"><span class="h">⚠ 一处必须更正的早期判断</span>
+    <p>「Qwen3.8 的形状比 QwQ 更适合我们」<b>在 GEMM 层面是错的</b>。同 session 对照：
+    TP=1 是 1.49–1.50× vs QwQ 的 1.55–1.56×，<b>低 2–4%</b>（18 个点里 17 个同号，方向可信）。
+    原因是 FFN 变瘦：<code>down</code> 的 K 从 27648 降到 17408。</p>
+    <p><b>真正的优势在部署形态，不在算子比值</b>：16.83 GiB 装得进一张卡 ⇒ TP=1 可用，
+    而 TP=1 是 1.50×、TP=4 只有 1.19×。这是部署论证，报告里必须这么写。</p></div>
+</section>
+
+<section>
+  <h2><span class="n">07</span>工具链迁移</h2>
+  <p class="sub">从 vllm-ascend 0.13.0 抬到 0.23.0（最新版），CANN 8.5 → 9.1.0。</p>
+
+  <h3>不用升驱动</h3>
+  <p>我们在容器里，<code>/usr/local/Ascend/driver</code> 是宿主机的<b>只读</b> bind-mount，
+  驱动动不了。但结果是<b>不需要动</b>：</p>
+  <ul>
+    <li>CANN 9.1.0 自报 <code>compatible_version</code> 含 <code>V100R001C23</code>，
+        正是本机 driver 25.5.1 的 Innerversion；</li>
+    <li>kernel <b>零改动</b> 55/55 编过，<code>check_ragged</code> <b>67 PASS / 0 FAIL</b>；</li>
+    <li>三个 Qwen3.8 形状与 CANN 8.5 <b>SNR / max err / sum 完全相同</b>，逐位一致
+        （性能 +0.4% ~ +2.9%，在 lab 噪声地板 ±2.6% 附近）。</li>
+  </ul>
+  <p>安装页写的 <code>HDK 26.0.RC1</code> 是「验证过的组合」，不是最低要求 ——
+  本机 driver 的 <code>compatible_version</code> 只列到 C23 却一直在跑 CANN 8.5.0 = C25，
+  这张表本来就是保守的。</p>
+
+  <h3>引擎管道的两个非默认开关</h3>
+  <p>0.23.0 默认把 engine core 放进独立进程，我们那条四层私有属性链和传 callable 的 RPC
+  全断。加两个环境变量后恢复：<code>VLLM_ENABLE_V1_MULTIPROCESSING=0</code>（强制
+  in-process，恢复 0.13.0 形态）与 <code>VLLM_ALLOW_INSECURE_SERIALIZATION=1</code>。
+  这条链已经被一个默认值的变化打断过一次，是整套接入里最脆的一环，
+  <b>应当拆掉改走 <code>apply_model</code> / <code>collective_rpc</code> 公开 API</b>。</p>
+
+  <h3>版本本身的代价（同口径、各跑 3 次、交替进行）</h3>
+  <div class="tw"><table>
+    <thead><tr><th>版本</th><th class="num">rep1</th><th class="num">rep2</th><th class="num">rep3</th><th class="num">中位数</th><th class="num">离散度</th></tr></thead>
+    <tbody>
+    <tr><td>vllm 0.13.0 / CANN 8.5</td><td class="num">6232.8</td><td class="num">6259.0</td><td class="num">6286.1</td><td class="num win">6259.0 µs</td><td class="num">0.85%</td></tr>
+    <tr><td>vllm 0.23.0 / CANN 9.1.0</td><td class="num">6829.1</td><td class="num">7082.8</td><td class="num">6715.7</td><td class="num lose">6829.1 µs</td><td class="num">5.4%</td></tr>
+    </tbody>
+  </table></div>
+  <p><b>0.23.0 慢 9.1%，两组完全不重叠</b>。慢的不是我们的 kernel —— 算子层已证明跨 CANN
+  逐位一致。反过来，0.23.0 的引擎启动和量化快了 30–50%。
+  引擎重启间的真实重复性是 0.85%–5.4%，比一直沿用的 ±15% 噪声带紧得多。</p>
+</section>
+
+<section>
+  <h2><span class="n">08</span>还不能说的话</h2>
+  <p class="sub">这一节的存在是为了让上面几节可以被引用。</p>
+  <div class="tw"><table>
+    <thead><tr><th style="width:40%">欠账</th><th>为什么它挡住了什么</th><th style="width:96px">状态</th></tr></thead>
+    <tbody>
+    <tr><td><b>精度</b>（真实权重 + GDN 递归敏感性）</td>
+        <td>所有 arm 都是 dummy 权重、无标定。P2 至今是<b>被挂起的 go/no-go</b>。
+        线性注意力是递归的，量化误差沿序列累乘，是 softmax 注意力没有的新风险。
+        <b>「midgroup 全量化保得住精度」目前只是论证（§05 读法 2），要在这里转成实测</b></td>
+        <td><span class="chip c-none">未验证</span></td></tr>
+    <tr><td>per-channel 全量化到底伤不伤模型性能</td>
+        <td>厂商在 QwQ 上把 <code>down_proj</code> 留 float 就是这条的证据；
+        需要真实权重下「我们 W4A8 vs 官方 per-channel W8A8」的精度对照才能坐实</td>
+        <td><span class="chip c-none">未验证</span></td></tr>
+    <tr><td>端到端相对 BF16 的<b>完整</b>加速比</td>
+        <td>b=1/4 的 1.79×/1.76× 已实测；但 48/64 层是 GDN，向量工作我们不加速，
+        混合负载（长上下文、高并发、多模态 prefill）的比值<b>只能测</b></td>
+        <td><span class="chip c-meas">部分实测</span></td></tr>
+    <tr><td>多模态负载</td>
+        <td>vision 塔保持 BF16；图片 token 把工作点推向 prefill，
+        而我们的 prefill <b>只是打平</b>（0.96–0.99×）</td>
+        <td><span class="chip c-none">未验证</span></td></tr>
+    <tr><td>TP&gt;1</td>
+        <td>本矩阵只跑 TP=1。算子级 TP=4 只剩 1.19×，<code>o/gdn_out</code> 输（K=1536 骑在 <code>K*</code> 上）</td>
+        <td><span class="chip c-calc">推算</span></td></tr>
+    <tr><td>厂商原生 W4A8 对照（真跑起来）</td>
+        <td>在 Qwen3.8 上撞两墙：3-D 输入 EZ1001 + <code>npugraph_ex</code> 编不过 ——
+        目前是「跑不了」，不是「慢」；它仍是 weight-only 这点的证据已拿到（§04 ‡）</td>
+        <td><span class="chip c-meas">实测</span>（跑不通本身）</td></tr>
+    <tr><td>多卡 / 长上下文 / Mamba state 并发曲线</td>
+        <td>GDN state 与长度无关、只与序列数挂钩 —— 这是 Qwen3.8 的<b>新</b>并发约束，
+        本矩阵只探到 <code>max_num_seqs=32</code> 一档</td>
+        <td><span class="chip c-none">未验证</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2><span class="n">09</span>下一步</h2>
+  <ol>
+    <li><b>精度关（挡结论最多的一条）</b>：下载真实权重（51.7 GiB）→
+        跑「我们的 W4A8 / 我们的 W8A8 / 官方 per-channel W8A8」同数据精度对照 +
+        GDN 递归路径敏感性分析 → 把 P2 挂起的 go/no-go 落地。
+        §05 读法 2 的论证在这里转实测</li>
+    <li><b>官方真对照</b>：厂商出货版 W8A8（<code>down_proj</code> 留 float 的那版）
+        与合成版（339 全量化）各是多少 —— 现在表里只有后者</li>
+    <li><b>拆私有链</b>（D8）：改走 <code>apply_model</code> / <code>collective_rpc</code>，
+        去掉 <code>VLLM_ENABLE_V1_MULTIPROCESSING=0</code> 这个非默认开关</li>
+    <li><b>多模态 prefill + 长上下文</b>：验证 §08 第三、四行的猜测，不许外推</li>
+    <li><b>MoE 明确不做</b>：vllm-ascend 已把 dispatch+FFN+combine 融成单 kernel，
+        那是新一期 kernel 工作，不是移植</li>
+  </ol>
+</section>
+
+<footer>
+  本报告口径与完整推演：<code>MGCKPT/P10_QWEN38_MIGRATION.md</code> ·
+  引擎矩阵：<code>int4_cube_lab/results/p10_qwen38_engine.csv</code> ·
+  算子扫描：<code>int4_cube_lab/results/p10_qwen38_shapes.csv</code> ·
+  合成描述：<code>npu_ops/python/gen_vendor_quant_desc.py</code> ·
+  跳过声明：<code>npu_ops/python/bench_engine_decode.py --expect-skip qwen38</code>
+</footer>
+</div>

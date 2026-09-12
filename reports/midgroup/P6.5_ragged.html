@@ -1,0 +1,800 @@
+<title>Ragged-K 契约</title>
+<style>
+  /* ---- tokens: complete light palette on bare :root ------------------ */
+  :root{
+    --paper:#F6F7FA;        /* cool white, blue-biased */
+    --card:#FFFFFF;
+    --ink:#151A23;          /* near-black with a blue cast */
+    --ink-2:#3D4757;
+    --slate:#69737F;        /* secondary text; neutral biased toward accent */
+    --rule:#DCE1E8;
+    --rule-2:#EDF0F4;
+    --accent:#0E6A76;       /* instrument teal */
+    --accent-soft:#DCEEF0;
+    --good:#2C7A4B;
+    --good-soft:#E3F1E8;
+    --warn:#8E5F12;
+    --warn-soft:#F7EEDC;
+    --pad:#B9C2CD;          /* the padding hatch */
+    --shadow:0 1px 2px rgba(21,26,35,.05), 0 8px 24px -16px rgba(21,26,35,.18);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#101319;
+      --card:#171B23;
+      --ink:#E7EBF1;
+      --ink-2:#C0C8D4;
+      --slate:#8B95A3;
+      --rule:#2A3140;
+      --rule-2:#20262F;
+      --accent:#54B6C1;
+      --accent-soft:#12333A;
+      --good:#6BC48C;
+      --good-soft:#16301F;
+      --warn:#D7A64B;
+      --warn-soft:#33280F;
+      --pad:#3A4351;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#101319; --card:#171B23; --ink:#E7EBF1; --ink-2:#C0C8D4;
+    --slate:#8B95A3; --rule:#2A3140; --rule-2:#20262F;
+    --accent:#54B6C1; --accent-soft:#12333A;
+    --good:#6BC48C; --good-soft:#16301F; --warn:#D7A64B; --warn-soft:#33280F;
+    --pad:#3A4351;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+
+  /* The page is written in Chinese; a Latin display webfont would fall back for
+     every CJK glyph and produce a mismatched page, so the hierarchy is carried by
+     weight, size and tracking on a CJK-capable stack instead. */
+  html{ -webkit-text-size-adjust:100%; }
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:"Noto Sans CJK SC","Source Han Sans SC","PingFang SC",
+                "Hiragino Sans GB","Microsoft YaHei",-apple-system,"Segoe UI",
+                Roboto,sans-serif;
+    font-size:16px;
+    line-height:1.85;
+    font-feature-settings:"kern" 1;
+  }
+  .wrap{ max-width:60rem; margin:0 auto; padding:clamp(2rem,5vw,4.5rem) clamp(1.1rem,4vw,2.5rem) 6rem; }
+
+  /* ---- masthead ------------------------------------------------------ */
+  .eyebrow{
+    font-size:.72rem; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--accent); font-weight:650; margin:0 0 1rem;
+  }
+  h1{
+    font-size:clamp(1.8rem,4.4vw,2.7rem); line-height:1.25; margin:0 0 .6rem;
+    font-weight:700; letter-spacing:-.015em; text-wrap:balance;
+  }
+  .standfirst{
+    font-size:clamp(1.02rem,2.2vw,1.16rem); color:var(--ink-2);
+    margin:0 0 1.6rem; max-width:44rem; text-wrap:pretty;
+  }
+  .byline{
+    display:flex; flex-wrap:wrap; gap:.4rem 1.1rem; align-items:baseline;
+    font-size:.83rem; color:var(--slate);
+    padding-bottom:1.6rem; border-bottom:1px solid var(--rule);
+  }
+  .byline code{ font-size:.83em; }
+
+  /* ---- the fractal diagram: the whole idea in one strip -------------- */
+  figure{ margin:2.4rem 0 0; }
+  figure svg{ display:block; width:100%; height:auto; }
+  figcaption{
+    font-size:.83rem; color:var(--slate); margin-top:.7rem;
+    max-width:42rem; line-height:1.7;
+  }
+  .k-lbl{ font:600 11px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  .k-num{ font:500 10px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+
+  /* ---- sections ------------------------------------------------------ */
+  section{ margin-top:3.4rem; }
+  h2{
+    font-size:1.28rem; font-weight:680; letter-spacing:-.01em; line-height:1.4;
+    margin:0 0 1rem; padding-top:1.2rem; border-top:1px solid var(--rule);
+    display:flex; gap:.85rem; align-items:baseline; text-wrap:balance;
+  }
+  /* The source report is a genuine argument in order (why -> contract ->
+     correctness -> price -> limits), so the numbers carry real sequence. */
+  h2 .n{
+    flex:none; font:650 .78rem/1.9 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    color:var(--accent); background:var(--accent-soft);
+    border-radius:.3rem; padding:0 .45rem; letter-spacing:.02em;
+  }
+  h3{ font-size:1.02rem; font-weight:650; margin:2rem 0 .6rem; letter-spacing:-.005em; }
+  p{ margin:0 0 1rem; max-width:44rem; text-wrap:pretty; }
+  strong{ font-weight:680; }
+  a{ color:var(--accent); }
+  code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:.885em; background:var(--rule-2); border-radius:.25rem;
+    padding:.1em .34em;
+  }
+  pre{
+    margin:1.2rem 0; padding:1rem 1.15rem; overflow-x:auto;
+    background:var(--card); border:1px solid var(--rule); border-radius:.5rem;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:.83rem; line-height:1.75; color:var(--ink-2);
+  }
+  pre code{ background:none; padding:0; font-size:1em; }
+
+  blockquote{
+    margin:1.4rem 0; padding:.2rem 0 .2rem 1.2rem;
+    border-left:3px solid var(--accent); color:var(--ink);
+    font-size:1.04rem; max-width:42rem;
+  }
+  blockquote p{ margin:0; }
+
+  /* ---- tables: the substance of the report --------------------------- */
+  .scroll{ overflow-x:auto; margin:1.3rem 0; border:1px solid var(--rule); border-radius:.5rem; background:var(--card); box-shadow:var(--shadow); }
+  table{ border-collapse:collapse; width:100%; font-size:.87rem; }
+  caption{
+    caption-side:top; text-align:left; padding:.85rem 1rem .1rem;
+    font-size:.79rem; color:var(--slate); letter-spacing:.01em;
+  }
+  th,td{ padding:.5rem .8rem; text-align:left; border-bottom:1px solid var(--rule-2); white-space:nowrap; }
+  thead th{
+    font-size:.73rem; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--slate); font-weight:650; border-bottom:1px solid var(--rule);
+    background:var(--card); position:sticky; top:0;
+  }
+  tbody tr:last-child td{ border-bottom:none; }
+  tfoot td{ border-top:1px solid var(--rule); border-bottom:none; font-weight:650; }
+  .num{ text-align:right; font-variant-numeric:tabular-nums;
+        font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.86em; }
+  .k{ font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.86em; color:var(--ink-2); }
+  .win{ color:var(--good); font-weight:650; }
+  .lose{ color:var(--warn); font-weight:650; }
+  .mut{ color:var(--slate); }
+
+  .chip{
+    display:inline-block; font-size:.72rem; font-weight:650; letter-spacing:.02em;
+    padding:.08rem .45rem; border-radius:.28rem; white-space:nowrap;
+  }
+  .chip.ok{ background:var(--good-soft); color:var(--good); }
+  .chip.hold{ background:var(--warn-soft); color:var(--warn); }
+  .chip.todo{ background:var(--rule-2); color:var(--slate); }
+
+  /* ---- headline metrics --------------------------------------------- */
+  .metrics{ display:grid; gap:.9rem; grid-template-columns:repeat(auto-fit,minmax(11rem,1fr)); margin:1.8rem 0 0; }
+  .metric{
+    background:var(--card); border:1px solid var(--rule); border-radius:.5rem;
+    padding:.9rem 1rem; box-shadow:var(--shadow);
+  }
+  .metric .lab{ font-size:.72rem; letter-spacing:.06em; text-transform:uppercase; color:var(--slate); font-weight:650; }
+  .metric .val{
+    font:650 1.5rem/1.25 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-variant-numeric:tabular-nums; margin-top:.3rem; letter-spacing:-.02em;
+  }
+  .metric .val.g{ color:var(--good); }
+  .metric .sub{ font-size:.78rem; color:var(--slate); line-height:1.6; margin-top:.15rem; }
+
+  ol,ul{ margin:0 0 1rem; padding-left:1.4rem; max-width:44rem; }
+  li{ margin-bottom:.45rem; }
+  li::marker{ color:var(--slate); }
+
+  @media (prefers-reduced-motion: no-preference){
+    a{ transition:opacity .15s ease; }
+  }
+  a:focus-visible,summary:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; border-radius:.2rem; }
+</style>
+
+<div class="wrap">
+
+  <p class="eyebrow">MGCKPT · P6.5 · 2026-08-17</p>
+  <h1>Ragged-K 契约</h1>
+  <p class="standfirst">
+    把 <code>K % 1024 == 0</code> 从算子契约里彻底拿掉之后，行并行投影第一次真的随
+    TP 缩放；对齐形状零退化，精度等于 P2 签核的那个配置。
+  </p>
+  <p class="byline">
+    <span>mid-group W4A8 · Ascend 910B4</span>
+    <span>单算子层已验证</span>
+    <span>引擎层进行中</span>
+    <span><code>reports/midgroup/P6.5_ragged.md</code></span>
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 720 152" role="img" aria-label="两个 K 的分组布局：K=6912 分成 6 个 1024 的满组加 1 个 768 的末组，不需要补齐；K=1057 分成 1 个 1024 加 1 个 33 元素的末组，补齐到 64。">
+      <!-- row 1: K=6912, seven groups, no padding needed -->
+      <text x="0" y="14" class="k-lbl" fill="var(--slate)">K = 6912　(down_proj @ TP=4)</text>
+      <g>
+        <rect x="0"   y="24" width="86" height="26" rx="2" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1"/>
+        <rect x="90"  y="24" width="86" height="26" rx="2" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1"/>
+        <rect x="180" y="24" width="86" height="26" rx="2" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1"/>
+        <rect x="270" y="24" width="86" height="26" rx="2" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1"/>
+        <rect x="360" y="24" width="86" height="26" rx="2" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1"/>
+        <rect x="450" y="24" width="86" height="26" rx="2" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1"/>
+        <rect x="540" y="24" width="64" height="26" rx="2" fill="var(--good-soft)" stroke="var(--good)" stroke-width="1"/>
+        <text x="43"  y="41" class="k-num" fill="var(--accent)" text-anchor="middle">1024</text>
+        <text x="133" y="41" class="k-num" fill="var(--accent)" text-anchor="middle">1024</text>
+        <text x="223" y="41" class="k-num" fill="var(--accent)" text-anchor="middle">1024</text>
+        <text x="313" y="41" class="k-num" fill="var(--accent)" text-anchor="middle">1024</text>
+        <text x="403" y="41" class="k-num" fill="var(--accent)" text-anchor="middle">1024</text>
+        <text x="493" y="41" class="k-num" fill="var(--accent)" text-anchor="middle">1024</text>
+        <text x="572" y="41" class="k-num" fill="var(--good)" text-anchor="middle">768</text>
+        <text x="614" y="41" class="k-num" fill="var(--slate)">补齐 0</text>
+      </g>
+      <!-- row 2: K=1057, a 33-element tail padded to one 64-element fractal -->
+      <text x="0" y="86" class="k-lbl" fill="var(--slate)">K = 1057　(病态形状)</text>
+      <g>
+        <rect x="0"  y="96" width="86" height="26" rx="2" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1"/>
+        <text x="43" y="113" class="k-num" fill="var(--accent)" text-anchor="middle">1024</text>
+        <rect x="90" y="96" width="14" height="26" rx="2" fill="var(--good-soft)" stroke="var(--good)" stroke-width="1"/>
+        <rect x="104" y="96" width="13" height="26" rx="2" fill="var(--pad)" stroke="var(--pad)" stroke-width="1" opacity=".55"/>
+        <text x="123" y="113" class="k-num" fill="var(--good)">33 真实</text>
+        <text x="175" y="113" class="k-num" fill="var(--slate)">+31 补零 → 64（一个 int4 fractal）</text>
+      </g>
+      <line x1="0" y1="140" x2="720" y2="140" stroke="var(--rule)" stroke-width="1"/>
+      <text x="0" y="152" class="k-num" fill="var(--slate)">对内补齐到 cube 的最小单元；对外 K 任意</text>
+    </svg>
+    <figcaption>
+      每组独立补齐，所以每组都从 fractal 边界开始、含整数个 fractal。QwQ-32B 在
+      TP=1…8 的全部八个行并行分片，补齐量都是 0 —— raggedness 全在组层级，碰不到
+      fractal 层级。
+    </figcaption>
+  </figure>
+
+  <div class="metrics">
+    <div class="metric">
+      <div class="lab">对齐形状退化</div>
+      <div class="val g">≤ 2.1%</div>
+      <div class="sub">6 个形状全在噪声地板 ±2.6% 内</div>
+    </div>
+    <div class="metric">
+      <div class="lab">比旧 TP 路线</div>
+      <div class="val g">1.23–2.78×</div>
+      <div class="sub">同形状、同一次 run</div>
+    </div>
+    <div class="metric">
+      <div class="lab">down @TP=4 对 W8A8</div>
+      <div class="val g">0.838</div>
+      <div class="sub">P6 是 1.83（越小越好）</div>
+    </div>
+    <div class="metric">
+      <div class="lab">精度相对 TP=1</div>
+      <div class="val g">+0.05 dB</div>
+      <div class="sub">从不更差，= P2 的配置</div>
+    </div>
+  </div>
+
+  <section>
+    <h2><span class="n">1</span>为什么要动契约</h2>
+    <p>
+      原 TP 路线是 <code>GK = 1024/TP</code>（TP=2→GK=512、TP=4→GK=256）。它数值上成立，
+      但性能上必死：<code>P0_COST.md</code> §5 在<strong>固定 K、只变 GK</strong> 的对照里
+      早就量过 —— GK=512 是 1.54–2.57× pc、GK=256 是 2.4–4.1× pc，P0 的判词是
+      「512 约打平、256 出局」。
+    </p>
+    <p>
+      P6 测到的行并行停滞（<code>mg/w8</code> 从 0.84 翻到 1.20 / 1.45 / 3.77）
+      <strong>就是 P0 那条代价曲线在 TP 强迫的 GK 上取值</strong>，不是新现象。
+      决定性旁证是 P6 自己的数据：<strong>列并行 eff@2 0.92–1.07、eff@4 0.77–1.06
+      几乎完美</strong> —— 列并行切 N，字节照样按 TP 减少，唯一区别是 <strong>GK 没变</strong>。
+    </p>
+    <blockquote><p>不是「TP 缩放不了」，是<strong>「GK 缩小」缩放不了</strong>。</p></blockquote>
+    <p>
+      所以路线定为：<strong>不缩 GK，让算子原生吃任意 K。</strong>
+      底层问题底层解决，不把底层约束推给上层找补。附带效果是这套算子从
+      「给 QwQ-32B 定做」变成通用算子。
+    </p>
+  </section>
+
+  <section>
+    <h2><span class="n">2</span>契约</h2>
+    <p>
+      <strong>对外：M、N、K 任意</strong>（K=1057、奇数 K、末组只有 1 个元素都要过）。
+      <strong>对内：每个量化组补零到一个 int4 cube fractal</strong>（C0 = 32 B = 64 元素）。
+    </p>
+<pre><code>G       = ceil(K / GK)
+n_g     = min(GK, K - g*GK)          // 第 g 组真实元素数
+n_g_pad = ceil(n_g / 64) * 64        // 补到 fractal
+offset  = g * ceil(GK / 64)          // 组起点，对每个 g 都成立</code></pre>
+    <p>
+      <strong>补零是精确的，不是近似的。</strong> 补进去的 <code>q_a = 0</code>、
+      <code>q_w = 0</code>，所以它对 Mmad 贡献 0，对两个 rank-1 修正项
+      （<code>w_ksum = Σ q_w</code>、<code>a_ksum = −Σ q_a</code>）也贡献 0 ——
+      <strong>因为这两个和是在补齐后的范围上求的，所以没有任何地方需要记录「真实元素数」</strong>。
+      末组的 <code>scale = amax(|x|)/127</code> 也不受影响（补零不抬高绝对值的 max）。
+    </p>
+  </section>
+
+  <section>
+    <h2><span class="n">3</span>正确性</h2>
+    <div class="scroll">
+      <table>
+        <caption>门禁形状是按机制分块的，不是堆 TP 形状：①对齐回归 ②短组但无短 slice ③短组+短 slice ④真有补齐字节 ⑤奇数 K。第 ④ 块抓出了一个真 bug（见 §6）。</caption>
+        <thead><tr><th>门禁</th><th>覆盖</th><th>结果</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>ragged_layout_test</code><span class="mut"> 纯 host ~1 s</span></td>
+            <td>补零 <strong>int32 逐位精确</strong>（零容差）；对齐形状与旧打包器<strong>逐字节相同</strong></td>
+            <td><span class="chip ok">ALL PASS</span></td>
+          </tr>
+          <tr>
+            <td><code>check_ragged.sh</code><span class="mut"> lab</span></td>
+            <td>3×TILE_M × 15 形状 + sym + GK=512/256 + 量化器 16 形状（逐字节）</td>
+            <td><span class="chip ok">62 / 62</span></td>
+          </tr>
+          <tr>
+            <td><code>test_ragged_seam.py</code><span class="mut"> torch 全链路</span></td>
+            <td>13 个 K × M ∈ {1, 7, 16, 64, 128}</td>
+            <td><span class="chip ok">65 / 65</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">4</span>对齐形状零退化</h2>
+    <p>
+      改动把 <code>mm.k</code> / <code>ldA/ldB.repeatTimes</code> 从编译期常数变成运行期值，
+      AIC 内层多了 scalar 计算。<strong>如果对齐路径退化了，P0–P6 的全部数字就不可比了</strong>，
+      所以这是比任何 TP 结果都更重要的一关。协议与 <code>sweep_p6_tp.sh</code> 逐字一致：
+      <code>--cold --profile --nosync</code>、median-of-3、warmup 10 / repeat 50。
+    </p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>proj</th><th class="num">M</th><th class="num">K</th><th class="num">旧基线 µs</th><th class="num">新 µs</th><th class="num">差</th><th>判定</th></tr></thead>
+        <tbody>
+          <tr><td>o</td><td class="num">16</td><td class="num">5120</td><td class="num">26.87</td><td class="num">26.74</td><td class="num win">−0.5%</td><td><span class="chip ok">噪声内</span></td></tr>
+          <tr><td>o</td><td class="num">128</td><td class="num">5120</td><td class="num">41.26</td><td class="num">40.69</td><td class="num win">−1.4%</td><td><span class="chip ok">噪声内</span></td></tr>
+          <tr><td>o</td><td class="num">512</td><td class="num">5120</td><td class="num">107.83</td><td class="num">106.73</td><td class="num win">−1.0%</td><td><span class="chip ok">噪声内</span></td></tr>
+          <tr><td>down</td><td class="num">16</td><td class="num">27648</td><td class="num">78.44</td><td class="num">76.80</td><td class="num win">−2.1%</td><td><span class="chip ok">噪声内</span></td></tr>
+          <tr><td>down</td><td class="num">128</td><td class="num">27648</td><td class="num">148.21</td><td class="num">148.02</td><td class="num win">−0.1%</td><td><span class="chip ok">噪声内</span></td></tr>
+          <tr><td>down</td><td class="num">512</td><td class="num">27648</td><td class="num">511.22</td><td class="num">508.92</td><td class="num win">−0.4%</td><td><span class="chip ok">噪声内</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>六个形状全在 lab 噪声地板 <strong>±2.6%</strong> 内（P6 D4）。运行期化没有代价。</p>
+  </section>
+
+  <section>
+    <h2><span class="n">5</span>TP 路线定价</h2>
+    <p>
+      三条 arm <strong>在同一次 run 内</strong>测，所以跨会话漂移无法解释任何差异
+      （P6 D6：决定性的对照是跟别人比，不是跟自己比）。
+    </p>
+    <h3>解码档 M=16 —— W4A8 存在的理由所在</h3>
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th>proj</th><th class="num">TP</th><th class="num">K_rank</th>
+          <th class="num">新 µs</th><th class="num">旧 µs</th><th class="num">w8 µs</th>
+          <th class="num">新/旧</th><th class="num">新/w8</th><th class="num">旧/w8</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>o</td><td class="num">1</td><td class="num">5120</td><td class="num">26.74</td><td class="num mut">—</td><td class="num">32.01</td><td class="num mut">—</td><td class="num win">0.835</td><td class="num">0.84</td></tr>
+          <tr><td>o</td><td class="num">2</td><td class="num">2560</td><td class="num">21.13</td><td class="num">26.01</td><td class="num">22.60</td><td class="num win">0.81</td><td class="num win">0.935</td><td class="num lose">1.15</td></tr>
+          <tr><td>o</td><td class="num">4</td><td class="num">1280</td><td class="num">18.70</td><td class="num">24.91</td><td class="num">17.55</td><td class="num win">0.75</td><td class="num lose">1.066</td><td class="num lose">1.42</td></tr>
+          <tr><td>o</td><td class="num">8</td><td class="num">640</td><td class="num">16.38</td><td class="num mut">不可能</td><td class="num mut">—</td><td class="num mut">—</td><td class="num mut">—</td><td class="num mut">—</td></tr>
+          <tr><td>down</td><td class="num">1</td><td class="num">27648</td><td class="num">76.80</td><td class="num mut">—</td><td class="num">124.91</td><td class="num mut">—</td><td class="num win">0.615</td><td class="num">0.62</td></tr>
+          <tr><td>down</td><td class="num">2</td><td class="num">13824</td><td class="num">50.27</td><td class="num">77.09</td><td class="num">68.29</td><td class="num win">0.65</td><td class="num win">0.736</td><td class="num lose">1.13</td></tr>
+          <tr><td>down</td><td class="num">4</td><td class="num">6912</td><td class="num">35.65</td><td class="num">77.99</td><td class="num">42.54</td><td class="num win">0.46</td><td class="num win">0.838</td><td class="num lose">1.83</td></tr>
+          <tr><td>down</td><td class="num">8</td><td class="num">3456</td><td class="num">25.81</td><td class="num mut">不可能</td><td class="num mut">—</td><td class="num mut">—</td><td class="num mut">—</td><td class="num mut">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="mut" style="font-size:.85rem">
+      「不可能」= 旧路线在 TP=8 要 GK=128，低于 kernel 地板。w8 在 K=3456 缺数是
+      int8 harness 要求 <code>K % 256</code>。
+    </p>
+
+    <h3>行并行缩放效率　<span class="mut" style="font-weight:400;font-size:.85rem"><code>eff = T(TP=1) / (TP × T(TP=k))</code>，0.5 = 零加速</span></h3>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>proj</th><th class="num">M</th><th class="num">eff@2 新</th><th class="num">旧</th><th class="num">eff@4 新</th><th class="num">旧</th></tr></thead>
+        <tbody>
+          <tr><td>o</td><td class="num">16</td><td class="num win">0.633</td><td class="num mut">0.517</td><td class="num win">0.357</td><td class="num mut">0.270</td></tr>
+          <tr><td>o</td><td class="num">512</td><td class="num win">0.734</td><td class="num mut">0.514</td><td class="num win">0.474</td><td class="num mut">0.259</td></tr>
+          <tr><td>down</td><td class="num">16</td><td class="num win">0.764</td><td class="num mut">0.509</td><td class="num win">0.539</td><td class="num mut">0.251</td></tr>
+          <tr><td>down</td><td class="num">512</td><td class="num win">0.911</td><td class="num mut">0.531</td><td class="num win">0.733</td><td class="num mut">0.265</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><strong>新路线在同形状上比旧路线快 1.23–2.78×</strong>，行并行第一次真的换到多卡加速。</p>
+  </section>
+
+  <section>
+    <h2><span class="n">6</span>三条必须一起读的边界</h2>
+    <h3>(a) prefill 档我们输给 W8A8，而且不是 ragged 造成的</h3>
+    <p>
+      <code>o/M=512/TP=1</code> 就已经是 <strong>1.170</strong> —— 那是 P0/P5 的大 M 结构性税，
+      跟 TP、跟 ragged 都无关。TP 只让它更明显（M=512：1.170 → 1.386 → 1.449）。
+      这与 P6 D13 已发布的结论一致（W4A8 是解码方案，prefill 输 0.64–0.69×），
+      <strong>部署形态仍然是 prefill/decode 分离</strong>。
+    </p>
+    <h3>(b) W8A8 在大 M 下超线性缩放，机制未定位</h3>
+    <p>
+      <code>down/M=512</code> 的 w8 是 618.29 → 234.66（2.63×，超过 2）。<code>--cold</code>
+      的轮换足以冲掉 L2（int8 侧 15 × 70.8 MB = 1.06 GB &gt; 168 MB），所以不是 harness
+      的 L2 假象。按 P5 D6 的规矩<strong>不给它编机制</strong>，只记录「大 M 的比值里有
+      未解释的成分」，不拿它支撑结论。
+    </p>
+    <h3>(c) TP=8 开始碰到新的上限</h3>
+    <p>
+      <code>o/M=128</code> 在 TP=8 是 27.75 µs，比 TP=4 的 26.74 <strong>更慢</strong>：
+      K_rank=640 时几乎没有 K 活了，每 tile 的固定开销（P5 的 dmaonly 地板）成了主项。
+      这是下一个杠杆，不是这一轮的问题。
+    </p>
+  </section>
+
+  <section>
+    <h2><span class="n">7</span>精度：等于 P2 签核的那个配置</h2>
+    <p>
+      TP 下每个分片<strong>独立量化</strong>，所以 ragged 只<strong>增加</strong>组边界、
+      不会变粗。用真实 QwQ-32B 权重（3 层的 o_proj + down_proj）量的 fake-quant SNR：
+    </p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th></th><th class="num">TP=1</th><th class="num">TP=2 新</th><th class="num">TP=2 旧</th><th class="num">TP=4 新</th><th class="num">TP=4 旧</th><th class="num">TP=8 新</th></tr></thead>
+        <tbody>
+          <tr><td>均值 dB</td><td class="num">15.89</td><td class="num">15.93</td><td class="num">16.74</td><td class="num">16.12</td><td class="num">17.73</td><td class="num">16.45</td></tr>
+          <tr><td>相对 TP=1</td><td class="num mut">—</td><td class="num win">+0.05</td><td class="num">+0.85</td><td class="num win">+0.23</td><td class="num">+1.84</td><td class="num win">+0.56</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      <strong>新路线从不比 TP=1 差</strong>，也就是<strong>精度等于 P2 测过的那个配置</strong>
+      —— 这才是门禁关心的量。旧路线（GK=1024/TP）确实更细、更好（+0.85 / +1.84 dB），
+      <strong>那是它用速度换来的精度</strong>，而它在速度上过不去。选路线时这两栏要一起看。
+    </p>
+  </section>
+
+  <section>
+    <h2><span class="n">8</span>路上抓到的四个坑</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th style="min-width:16rem">坑</th><th style="white-space:normal;min-width:26rem">为什么值得记</th></tr></thead>
+        <tbody>
+          <tr>
+            <td style="white-space:normal"><strong><code>DataCopyPad</code> 的 <code>isPad=false</code></strong> 会把 GM 里紧随其后的<strong>真实数据</strong>读进补齐区（66 字节请求搬 96 字节）</td>
+            <td style="white-space:normal">症状极具误导性：<code>a_scale</code> <strong>全过</strong>（同分布多 15 个采样，amax 在 bf16 下常常不变），<code>a_ksum</code>/<code>a_hi</code>/<code>a_lo</code> 全错。<strong>「amax 对、和错」直接指向多读了同分布数据</strong>，而不是算错了</td>
+          </tr>
+          <tr>
+            <td style="white-space:normal"><strong>改 <code>.inc</code> 不触发 kernel 重编</strong> —— <code>ascendc_library</code> 不追踪它</td>
+            <td style="white-space:normal">第一次修上一条「没生效」就是这个：编的只有 host，kernel 是旧的，于是<strong>拿旧 kernel 出数</strong>。已在 <code>build.sh</code> 里堵死</td>
+          </tr>
+          <tr>
+            <td style="white-space:normal">harness 参考实现用 <code>M</code> 而非 <code>Mp</code> 取 <code>a_scale</code> 行距（既有 bug）</td>
+            <td style="white-space:normal">只要 M 被补齐就全表 FAIL，看起来像 kernel 坏了。开工时把 ragged 的失败和 M 补齐的失败混在了一起。之所以活到今天：所有既有调用点恰好 <code>M % TILE_M == 0</code></td>
+          </tr>
+          <tr>
+            <td style="white-space:normal">ragged 让<strong>常量组</strong>第一次可达，而 asym 量化器在那里是坏的</td>
+            <td style="white-space:normal"><code>_tiny_where_zero</code> 把 scale 抬到 tiny，<strong>但没管 zero</strong>：<code>zero = qmin − round(mn/tiny)</code> ≈ 1e35，在 bf16 里还是有限值，一路传到 kernel 的 <code>wz*a_ksum</code> 才在 fp32 变 inf。<strong>一个只护住公式一半的 guard，比没有 guard 更危险</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      第四条的修复已验证：非退化组（gl=1024/512/128/33）与修改前<strong>逐位相同</strong>
+      ⇒ P2 的数字不受影响。它也说明 <strong>lab 门禁自己造的输入分布可能恰好绕过真实管线
+      才会踩的退化情形</strong>（这里是 <code>w_zero</code> 是随机生成的而不是从数据算的），
+      所以 torch 侧的 seam 测试不是重复劳动。
+    </p>
+  </section>
+
+  <section>
+    <h2><span class="n">9</span>状态与下一步</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>项</th><th>状态</th></tr></thead>
+        <tbody>
+          <tr><td>布局契约 + 补零精确性</td><td><span class="chip ok">int32 零容差</span></td></tr>
+          <tr><td>lab / torch 门禁</td><td><span class="chip ok">62/62 · 65/65</span></td></tr>
+          <tr><td>对齐形状零退化</td><td><span class="chip ok">≤2.1%，噪声内</span></td></tr>
+          <tr><td>单算子 TP 定价</td><td><span class="chip ok">见 §5</span></td></tr>
+          <tr><td>精度</td><td><span class="chip ok">= P2 配置（+0.05 dB）</span></td></tr>
+          <tr><td>两份 <code>.so</code></td><td><span class="chip ok">重编 + 实测</span></td></tr>
+          <tr><td>vLLM 引擎 TP=2/4 逐 rank 转换验证</td><td><span class="chip ok">converted=16, skipped=0</span></td></tr>
+          <tr><td>引擎级 TP 端到端</td><td><span class="chip hold">已测，结论为负 → §10</span></td></tr>
+          <tr><td>N 轴 ragged（<code>N % 128</code> 仍在）</td><td><span class="chip todo">需先打尾巴探针</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:.88rem;color:var(--slate)">
+      <strong>产物：</strong><code>results/p65_ragged_tp.csv</code>、
+      <code>int4_cube_lab/scripts/{check_ragged.sh, sweep_ragged_tp.sh, sweep_p65_tp_engine.sh}</code>、
+      <code>int4_cube_lab/host/ragged_layout_test.cpp</code>、
+      <code>npu_ops/python/test_ragged_seam.py</code>、
+      <code>fakequant_lab/run_ragged_shard_snr.py</code>。
+      决策与坑的完整记录见 <code>MGCKPT/P6.5_TP.md</code>。
+    </p>
+  </section>
+
+  <section>
+    <h2><span class="n">10</span>引擎级 TP：计算减半了，延迟没降</h2>
+    <p>
+      单算子的收益是真的，但端到端没兑现。这一节是<strong>负面结果</strong>，
+      以及它为什么<strong>不在 kernel 里</strong>。
+    </p>
+    <div class="scroll">
+      <table>
+        <caption>L=16、batch=1、FULL_DECODE_ONLY，step µs。方向在 6 个测点上一致（TP=2 是 0.93/0.88/0.90，TP=4 是 0.87/0.87/0.84 @batch 1/16/64）。</caption>
+        <thead><tr><th>arm</th><th class="num">TP=1</th><th class="num">TP=2</th><th class="num">TP=4</th><th class="num">TP1→4</th></tr></thead>
+        <tbody>
+          <tr><td>BF16</td><td class="num">20868</td><td class="num">14506</td><td class="num">12690</td><td class="num win">1.64×</td></tr>
+          <tr><td>我们 W8A8</td><td class="num">12246</td><td class="num">11959</td><td class="num">11842</td><td class="num mut">1.03×</td></tr>
+          <tr><td>我们 W4A8</td><td class="num">10045</td><td class="num">10808</td><td class="num">11589</td><td class="num lose">0.87×</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>账逐项对得上，不需要任何减法</h3>
+    <div class="scroll">
+      <table>
+        <caption>step_trace_time.csv，µs/step，w4a8。profiling 开着所以绝对值偏大。</caption>
+        <thead><tr><th></th><th class="num">Computing</th><th class="num">Comm（未重叠）</th><th class="num">Overlapped</th><th class="num">Free</th><th class="num">Stage</th></tr></thead>
+        <tbody>
+          <tr><td>TP=1</td><td class="num">6751</td><td class="num">0</td><td class="num">0</td><td class="num">5302</td><td class="num">12053</td></tr>
+          <tr><td>TP=4</td><td class="num win">3275</td><td class="num lose">3632</td><td class="num lose">0</td><td class="num">5976</td><td class="num">12882</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ol>
+      <li><strong>计算确实减半</strong>（2.06×）。lab 预测 GEMM 省 2770 µs，实测 Computing
+        省 3476 µs，多出的 ~700 µs 是注意力头也随 TP 切了 —— 两边独立吻合。
+        <strong>kernel 侧兑现了。</strong></li>
+      <li><strong><code>Overlapped = 0</code></strong>：collective 一微秒都没和计算重叠。</li>
+      <li><strong>Free 那 5.3 ms 没动</strong>（TP=1 就有，331 µs/层）。</li>
+    </ol>
+    <blockquote><p>
+      省 3476 − 加 3632 − 空闲涨 674 = <strong>+829 µs</strong>，
+      与实测 12053 → 12882 <strong>完全相等</strong>。
+    </p></blockquote>
+    <p>
+      根因是 Amdahl：我们的 GEMM 只占 step 的 <strong>38%</strong>（占设备忙时的 68%），
+      所以把它做便宜 2.5× 的上限就是 1.6×，而 TP 还要在上面加自己的通信。
+      W8A8 完全平是同一回事（GEMM 占比更小）；BF16 变快是因为它的 GEMM 占比大得多。
+    </p>
+
+    <h3>排除掉的四个「是不是我们没做对」</h3>
+    <div class="scroll">
+      <table>
+        <thead><tr><th style="white-space:normal">假设</th><th>判定</th><th style="white-space:normal">依据</th></tr></thead>
+        <tbody>
+          <tr><td style="white-space:normal">我们的 op 进不了 ACL graph</td><td><span class="chip todo">排除</span></td><td class="k"><code>--eager</code> 31003 vs graph 10045 µs = <strong>3.09×</strong></td></tr>
+          <tr><td style="white-space:normal">那笔开销在 host 侧</td><td><span class="chip todo">排除</span></td><td style="white-space:normal">profile 里它是 <code>Communication</code> 和 <code>Free</code>，都是设备侧</td></tr>
+          <tr><td style="white-space:normal">BF16 走了 matmul-allreduce 融合而我们没走</td><td><span class="chip todo">排除</span></td><td style="white-space:normal"><code>VLLM_ASCEND_ENABLE_MATMUL_ALLREDUCE</code> 默认 <code>'0'</code>，对所有 arm 都关着</td></tr>
+          <tr><td style="white-space:normal">TP=4 用了跨拓扑组的设备（1,2,3,4）</td><td><span class="chip hold">只对解码无关</span></td><td style="white-space:normal">10 KB 上换 2,3,4,5 一样，但 <strong>2560 KB 上差 1.29×</strong>（6.92 vs 8.94 GB/s）—— 见下方更正</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>组内 vs 跨组：1.78×，而它打在我们最弱的环节上</h3>
+    <p>
+      上一行那个「排除」是错的。两组设备<strong>都是跨组的</strong>，我拿两个落在同一侧
+      的配置去否证一个区分。用 TP=2 才做得出干净对照（TP=4 做不到：device 0 挂死，
+      组内凑不出 4 张卡）：
+    </p>
+    <div class="scroll">
+      <table>
+        <caption>10240 KB payload，ring 总线带宽。三个组内配置紧到 11.30–11.31 GB/s，唯一跨组的翻了 1.78 倍。</caption>
+        <thead><tr><th>设备</th><th>组关系</th><th class="num">10 MB</th><th class="num">ring 带宽</th></tr></thead>
+        <tbody>
+          <tr><td class="k">1,2</td><td>组内 {0–3}</td><td class="num">927 µs</td><td class="num">11.31 GB/s</td></tr>
+          <tr><td class="k">2,3</td><td>组内 {0–3}</td><td class="num">927 µs</td><td class="num">11.31 GB/s</td></tr>
+          <tr><td class="k">4,5</td><td>组内 {4–7}</td><td class="num">928 µs</td><td class="num">11.30 GB/s</td></tr>
+          <tr><td class="k"><strong>3,4</strong></td><td><strong>跨组</strong></td><td class="num win">521 µs</td><td class="num win">20.14 GB/s</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      两组各四卡、各有自己的带宽域，跨组的 ring 同时吃两组。<strong>逻辑分组确认为
+      {0,1,2,3} / {4,5,6,7}</strong>。10 KB 上四种配置都是 ~175 µs。
+    </p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>场景</th><th>payload</th><th>选卡是否有用</th></tr></thead>
+        <tbody>
+          <tr><td>解码 batch=1</td><td class="num">10 KB</td><td><span class="chip todo">❌ 延迟受限，四种配置一样</span></td></tr>
+          <tr><td>prefill / 大 batch</td><td class="num">≥2.5 MB</td><td><span class="chip ok">✅ 均衡跨组值 1.78×</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      <strong>这条打在我们最弱的环节上</strong>：行并行的 all-reduce 是
+      <code>[M, hidden]</code>，<strong>prefill 的 M 是几千</strong>
+      （M=2048 → 20 MB，牢牢在带宽区），而 §6(a) 说的正是 prefill 我们输 0.64–0.69×。
+      TP=4 的具体建议：用 <code>2,3,4,5</code>（2+2）而不是 <code>1,2,3,4</code>（3+1），
+      2560 KB 上 1.29×。
+    </p>
+
+    <h3>但解码档仍是纯延迟受限 —— 这决定融合要怎么做</h3>
+    <div class="scroll">
+      <table>
+        <caption>bench_allreduce.py，4 rank。字节 ×64，时间 ×1.03：贵的不是线，是每次调用的固定开销。</caption>
+        <thead><tr><th class="num">payload</th><th class="num">devs 1,2,3,4</th><th class="num">devs 2,3,4,5</th></tr></thead>
+        <tbody>
+          <tr><td class="num">10 KB</td><td class="num">258 µs</td><td class="num">271 µs</td></tr>
+          <tr><td class="num">640 KB</td><td class="num">268 µs</td><td class="num">265 µs</td></tr>
+          <tr><td class="num">2560 KB</td><td class="num">568 µs</td><td class="num">440 µs</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      ❌ <strong>分块流水</strong>（沿 N 切块、块间重叠，<code>npu_mm_all_reduce_base</code>
+      的做法）在这台机器上<strong>更糟</strong> —— 每块都付满 ~113 µs，切 4 块把通信从
+      113 变成 452 µs。第二个独立理由：batch=1 解码层内是严格串行链
+      （qkv → attn → o_proj → AR → norm → gate_up → down_proj → AR → norm → 下一层），
+      <strong>没有独立工作可以藏</strong>。
+    </p>
+    <p>
+      ✅ <strong>消掉那次调用</strong>：一个 fused op，让 GEMM 在 epilogue 里直接做跨 rank
+      归约，不再有独立的 HCCL launch。先例是 CANN 自己的
+      <code>npu_mm_all_reduce_base</code>（matmul + all-reduce 单 op），说明跨设备原语存在。
+    </p>
+
+    <p class="mut" style="font-size:.85rem">
+      口径：profiling 会放大 host 时间。未开 profile 时空闲是 <strong>3.3 ms（33%）</strong>，
+      开着是 5.3 ms（44%）。引用哪个数要说清。
+    </p>
+  </section>
+
+  <section>
+    <h2><span class="n">11</span>那 5 ms 空闲：查清了，一个开关拿回 1.23×</h2>
+
+    <h3>不是图被切碎 —— 我先前的推断是错的</h3>
+    <div class="scroll">
+      <table>
+        <caption>图被切碎应该是 ~1000 个 ~330 µs 的 gap。实际大 gap 只有 370 个却占了 84.5%。</caption>
+        <thead><tr><th class="num">gap 大小</th><th class="num">个数</th><th class="num">占空闲</th></tr></thead>
+        <tbody>
+          <tr><td class="num">&lt;10 µs</td><td class="num">12697</td><td class="num">4.0%</td></tr>
+          <tr><td class="num">&gt;200 µs</td><td class="num">370</td><td class="num lose">84.5%</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="scroll">
+      <table>
+        <caption>一个中位步：257 个 kernel，span 10786 = busy 6735 + idle 4050 µs。5 个 gap 占 idle 的 91%，全在模型 forward 之前。</caption>
+        <thead><tr><th class="num">gap</th><th>之后紧跟的 kernel</th><th>是什么</th></tr></thead>
+        <tbody>
+          <tr><td class="num lose">1889 µs</td><td class="k">aclnnInplaceFillScalar_Fill</td><td>填输入缓冲</td></tr>
+          <tr><td class="num">653 µs</td><td class="k">aclnnInplaceFillScalar_Fill</td><td>同上</td></tr>
+          <tr><td class="num">490 µs</td><td class="k">FusedInferAttentionScore</td><td>注意力前</td></tr>
+          <tr><td class="num">444 / 209 µs</td><td class="k">aclnnIndexSelect_GatherV3</td><td>取 block table</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>空闲与 arm 无关 —— 三点确认</h3>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>arm</th><th class="num">Computing</th><th class="num">Free</th><th class="num">step</th><th class="num">Free 占比</th></tr></thead>
+        <tbody>
+          <tr><td>BF16</td><td class="num">17806</td><td class="num">4703</td><td class="num">22626</td><td class="num">21%</td></tr>
+          <tr><td>我们 W8A8</td><td class="num">9006</td><td class="num">5021</td><td class="num mut">—</td><td class="num mut">—</td></tr>
+          <tr><td>我们 W4A8</td><td class="num">6751</td><td class="num">5302</td><td class="num">12053</td><td class="num lose">44%</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <blockquote><p>
+      绝对值一样、占比差一倍 ⇒ <strong>引擎每步的固定 host 开销，不是我们引入的</strong>。
+      正确表述：我们把计算做快了 2.6×，于是引擎的固定成本变成了 step 的 44% ——
+      这是「跑得太快」的问题。
+    </p></blockquote>
+
+    <h3><code>--async-scheduling</code>：一个开关，1.23–1.29×</h3>
+    <div class="scroll">
+      <table>
+        <caption>vLLM 的 SchedulerConfig.async_scheduling 默认关，作用是把 host 准备与上一步的 forward 重叠。</caption>
+        <thead><tr><th>arm</th><th class="num">batch</th><th class="num">async 关</th><th class="num">async 开</th><th class="num">加速</th></tr></thead>
+        <tbody>
+          <tr><td><strong>我们 W4A8</strong></td><td class="num">1</td><td class="num">10045</td><td class="num win">8182</td><td class="num win">1.23×</td></tr>
+          <tr><td><strong>我们 W4A8</strong></td><td class="num">16</td><td class="num">12124</td><td class="num win">9430</td><td class="num win">1.29×</td></tr>
+          <tr><td>BF16</td><td class="num">1</td><td class="num">20868</td><td class="num">18687</td><td class="num">1.12×</td></tr>
+          <tr><td>BF16</td><td class="num">16</td><td class="num">24850</td><td class="num">21634</td><td class="num">1.15×</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      零代码、零 kernel 改动，而且<strong>帮我们比帮 BF16 多</strong>（空闲在我们 step 里
+      占比更大）。<strong>对 BF16 的领先从 2.08× 涨到 2.28×</strong>。3.3 ms 空闲里
+      async 吃掉约 1.9 ms，剩 ~1.4 ms 重叠不掉。
+    </p>
+    <blockquote><p>
+      ⚠ <strong><code>async_scheduling</code> 不支持 PP</strong> —— P6 那条已交付的 PP
+      路线用不了它。这是 PP 与 TP 之间新增的一条不对称，选部署形态时要算进去。
+    </p></blockquote>
+    <p class="mut" style="font-size:.85rem">
+      <strong>L=16 系统性放大占比</strong>：空闲是每步固定的、不随层数长，真实 64 层
+      设备活儿 4 倍而空闲不变 ⇒ 占比降到约 <strong>17%</strong>，所以 async 在真实模型上
+      的收益会小于 1.23×。（TP 那笔交易两边都随 L 线性，所以 §10 的结论在 L=64 不变。）
+    </p>
+
+    <h3>async 开着之后，TP 变成精确打平 —— §10 那笔账的独立验证</h3>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>w4a8, async 开</th><th class="num">TP=1</th><th class="num">TP=4</th></tr></thead>
+        <tbody>
+          <tr><td>batch=1</td><td class="num">8182</td><td class="num"><strong>8217</strong>（1.00×）</td></tr>
+          <tr><td>batch=16</td><td class="num">9430</td><td class="num lose">11102（0.85×）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <blockquote><p>
+      去掉 idle 项之后 TP=4 与 TP=1 完全相等（差 35 µs = 0.4%），而 §10 的分解预测的是
+      (GEMM 省 3476) − (通信加 3632) = <strong>+156 µs ≈ 0</strong> ——
+      <strong>用完全不同的方法算出同一个 0</strong>。
+    </p></blockquote>
+    <p>
+      <strong>这让 fused op 的定性变了</strong>：TP 现在不是「亏」，是<strong>精确打平</strong>，
+      而挡在「打平」与「TP 真的有用」之间的就是那 3632 µs 通信。消掉它 ⇒
+      8217 − 3632 ≈ 4.6 ms ⇒ <strong>对 TP=1 是 1.78×</strong>（不是先前估的 1.30×，
+      因为基线已被 async 压低）。<strong>fused GEMM+all-reduce 从「挽回亏损」升级成
+      「TP 能不能用的唯一开关」。</strong>
+    </p>
+
+    <h3>下一步，按收益排序</h3>
+    <div class="scroll">
+      <table>
+        <thead><tr><th style="white-space:normal">事项</th><th class="num">收益</th><th>状态</th></tr></thead>
+        <tbody>
+          <tr><td><code>--async-scheduling</code></td><td class="num win">1.23–1.29×</td><td><span class="chip ok">已验，一个开关</span></td></tr>
+          <tr><td style="white-space:normal"><strong>fused GEMM + all-reduce</strong></td><td class="num win">1.78×</td><td><span class="chip hold">⛔ 被 MC2 阻塞 → §12</span></td></tr>
+          <tr><td style="white-space:normal">剩下 1.4 ms 不可重叠空闲</td><td class="num">≤1.2×</td><td><span class="chip todo">未查</span></td></tr>
+          <tr><td style="white-space:normal">prefill TP 挑均衡跨组设备</td><td class="num">1.78×（仅通信）</td><td><span class="chip todo">见 §10</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">12</span>fused op 开工调研：原语齐全，MC2 跑不起来</h2>
+    <p>
+      按「不猜先探」的规矩，开工第一步是查原语和定价，不是写 kernel。三个结果：
+    </p>
+    <h3>(1) in-kernel HCCL 原语存在，而且比预想的强</h3>
+    <p>
+      <code>adv_api/hccl/hccl.h</code> 的 <code>class Hccl</code>：<code>AllReduce</code> 加
+      <strong><code>Commit</code> / <code>Wait</code> 解耦</strong>（所以能真重叠），
+      而且有 <strong><code>GetWindowsInAddr(rankId)</code></strong> ——
+      「shared by all ranks in the same comm group」，即<strong>内核内直接访问对端显存</strong>。
+    </p>
+    <div class="scroll">
+      <table>
+        <caption>两条设计，第二条才贴合 §10 的测量（贵的是机制不是线）。AllReduce 的 repeat&gt;1 就是分块流水的接口 —— 显式不用。</caption>
+        <thead><tr><th></th><th style="white-space:normal">做法</th><th style="white-space:normal">10 KB 上的预期</th></tr></thead>
+        <tbody>
+          <tr><td>A</td><td style="white-space:normal"><code>Hccl::AllReduce</code> + <code>Commit</code>/<code>Wait</code></td><td style="white-space:normal">省掉 op launch，仍走 task/msg 机制</td></tr>
+          <tr><td><strong>B</strong></td><td style="white-space:normal"><code>GetWindowsInAddr</code> + <code>QueueBarrier</code> + 自己在 AIV 里归约</td><td style="white-space:normal"><strong>完全没有 HCCL task</strong>，成本只剩 barrier</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h3>(2) host 侧的 context 不用自己造</h3>
+    <p>
+      <code>npu_mm_all_reduce_base(x1, x2, str hcom, ...)</code> 的通信域就是一个
+      <strong>字符串 comm name</strong>，
+      <code>pg._get_backend(torch.device("npu")).get_hccl_comm_name(rank)</code> 一行拿到
+      （vllm-ascend <code>linear_op.py:457</code> 就这么用）。
+    </p>
+    <h3>(3) ⛔ 但 MC2 跑不起来</h3>
+    <p>
+      本想用 CANN 自带的融合算子给项目定价（不写一行 kernel），4 rank 上必然失败：
+    </p>
+<pre><code>aclnnQuantMatmulAllReduceV2 failed, error code is 561000
+Nnopbase fails to invoke the HcclAllocComResourceByTiling ... ret = 4</code></pre>
+    <p>
+      <code>HCCL_BUFFSIZE=200</code>、<code>HCCL_OP_EXPANSION_MODE=AIV</code> 都不解决。
+    </p>
+    <blockquote><p>
+      <strong>为什么这个负面结果值钱</strong>：我们自研的 <code>Hccl::InitV2</code> 会走
+      <strong>同一条</strong> <code>HcclAllocComResource</code> 路径，所以这个阻塞会原样
+      挡住我们。<strong>在一个下午发现它，比写三天 AscendC 之后发现强得多。</strong>
+    </p></blockquote>
+    <p>
+      ⇒ <strong>fused op 的第一个任务不是写 kernel，是让这台机器上跑通任何一个 MC2 算子。</strong>
+      通了之后立刻用 <code>bench_fused_allreduce.py</code> 给融合定价，
+      那个数决定后面值不值得投入。
+    </p>
+  </section>
+
+</div>

@@ -1,0 +1,5 @@
+arm,layers,tp,pp,graph,cudagraph_mode,batch,prompt_len,out_len,total_s,gen_tok,step_us,per_layer_us,throughput_tok_s,prefill_ms,async_sched
+w4a8,32,1,1,aclgraph,FULL_DECODE_ONLY,1,1024,64,1.0833,64,16925.93,528.935,59.08,,0
+w4a8,32,1,1,aclgraph,FULL_DECODE_ONLY,16,1024,64,1.4808,1024,23136.99,723.031,691.53,,0
+w8a8,32,1,1,aclgraph,FULL_DECODE_ONLY,1,1024,64,1.3357,64,20870.20,652.194,47.92,,0
+w8a8,32,1,1,aclgraph,FULL_DECODE_ONLY,16,1024,64,1.7389,1024,27169.74,849.054,588.89,,0

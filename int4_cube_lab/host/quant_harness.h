@@ -18,6 +18,7 @@
 
 #include "acl/acl.h"
 #include "acl_utils.h"
+#include "mg_kgeom.h"
 #include "bf16.h"
 #include "data_utils.h"
 
@@ -72,15 +73,20 @@ inline int Run(int argc, char** argv, uint32_t gk, const char* opName, LaunchFn 
     Args args = ParseArgs(argc, argv);
     const uint32_t M = static_cast<uint32_t>(args.rows);
     const uint32_t K = static_cast<uint32_t>(args.k);
-    if (M == 0 || K == 0 || (K % gk) || (K % 2)) {
-        std::cerr << "shape constraint: K multiple of GK=" << gk << " and even\n";
+    // K is ARBITRARY, odd included: the kernel emits the grouped PADDED layout of
+    // mg_kgeom.h, so a short final group (and a dangling half-byte) are its job,
+    // not the caller's.
+    if (M == 0 || K == 0) {
+        std::cerr << "shape constraint: M and K must be non-zero\n";
         return 1;
     }
     PrintHeader(opName, args);
 
-    const uint32_t numG = K / gk;
+    const uint32_t kAlign = mgk::kCubeKElemsInt4;
+    const uint32_t numG = mgk::NumGroups(K, gk);
+    const uint32_t KbPad = mgk::KPadElems(K, gk, kAlign) / 2;
     const size_t xCount = (size_t)M * K;
-    const size_t planeBytes = (size_t)M * (K / 2);
+    const size_t planeBytes = (size_t)M * KbPad;
     const size_t sCount = (size_t)numG * M;
 
     // Activation-like values: a few outliers, otherwise small.  The scale is a
@@ -91,17 +97,26 @@ inline int Run(int argc, char** argv, uint32_t gk, const char* opName, LaunchFn 
     std::vector<uint16_t> hSRef(sCount);
     std::vector<int32_t> hKRef(sCount);
     {
-        std::vector<int8_t> q(gk);
+        std::vector<int8_t> q(mgk::CeilTo(gk, kAlign), 0);
         for (uint32_t m = 0; m < M; ++m) {
             for (uint32_t g = 0; g < numG; ++g) {
                 uint16_t s;
                 int32_t kn;
-                ReferenceQuantGroup(hX, (size_t)m * K + (size_t)g * gk, gk, q, s, kn);
+                // The group's REAL width feeds the quantiser (so amax, scale and
+                // ksum come from real data only); the padded tail stays q = 0,
+                // whose MSD split is hi = 0, lo = -8.  That is what the kernel
+                // produces by zeroing its UB tail, and the comparison below is
+                // byte-exact, so a disagreement about the pad cannot slip through.
+                const uint32_t real = mgk::GroupRealElems(g, K, gk);
+                const uint32_t gpad = mgk::GroupPadElems(g, K, gk, kAlign);
+                std::fill(q.begin(), q.begin() + gpad, 0);
+                ReferenceQuantGroup(hX, (size_t)m * K + (size_t)g * gk, real, q, s, kn);
                 hSRef[(size_t)g * M + m] = s;
                 hKRef[(size_t)g * M + m] = kn;
                 // Pack: even index in the LOW nibble, matching PackInt4.
-                const size_t base = (size_t)m * (K / 2) + (size_t)g * (gk / 2);
-                for (uint32_t j = 0; j < gk / 2; ++j) {
+                const size_t base = (size_t)m * KbPad
+                                  + mgk::GroupOffsetElems(g, gk, kAlign) / 2;
+                for (uint32_t j = 0; j < gpad / 2; ++j) {
                     const int32_t q0 = q[2 * j], q1 = q[2 * j + 1];
                     const int32_t hi0 = q0 >> 4, hi1 = q1 >> 4;
                     const int32_t lo0 = (q0 & 15) - 8, lo1 = (q1 & 15) - 8;
@@ -141,7 +156,9 @@ inline int Run(int argc, char** argv, uint32_t gk, const char* opName, LaunchFn 
 
     std::cout << "[launch]     blockDim=" << blockDim << " AIV (of " << aivTotal
               << ")  M=" << M << " K=" << K
-              << " GK=" << gk << " groups=" << numG << " items=" << items << "\n"
+              << " GK=" << gk << " groups=" << numG
+              << " lastGK=" << mgk::GroupRealElems(numG - 1, K, gk)
+              << " Kpad/2=" << KbPad << " items=" << items << "\n"
               << std::flush;
 
     auto run_once = [&]() { launch(blockDim, stream, dX, dHi, dLo, dS, dK, M, K); };

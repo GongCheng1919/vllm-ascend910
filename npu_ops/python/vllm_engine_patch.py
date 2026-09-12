@@ -43,6 +43,66 @@ from vllm_midgroup_linear import MidGroupW4A8Linear  # noqa: E402
 GROUP = 1024
 TILE_N = 128
 
+# ---------------------------------------------------------------------------
+# Expected-skip policies.
+#
+# A skip leaves that linear in BF16, so an arm with ANY skip is a mixture
+# reported under a pure arm's name -- the D0 failure.  That is why the bench
+# refuses to publish a run with skipped>0.  But on Qwen3.8-27B a fixed set of
+# layers is skipped BY DESIGN (P10 D5), and refusing those means the arm can
+# never produce a throughput number at all.
+#
+# The resolution is NOT to relax the gate to a count.  A count cannot tell the
+# by-design set from a coverage hole (P10 D10).  Instead the caller must DECLARE
+# the set it expects, layer-name pattern by layer-name pattern, with a reason;
+# the gate then passes only if EVERY skipped layer matches a declared pattern.
+# One unexpected skip still fails the run.  The declaration is printed into the
+# log and belongs in the result caption, because a run under this policy is
+# "W4A8 except <these>", not "W4A8".
+#
+# The bar for admitting a pattern here is higher than the bar for skipping:
+# a skip only has to fail the shape contract, an entry here has to be a layer
+# we would leave in BF16 even if the shape contract were lifted.
+EXPECTED_SKIPS = {
+    "none": [],
+    "qwen38": [
+        ("visual.", "mlp.linear_fc1",
+         "vision tower FFN up-projection, N=4304 not a multiple of 128 AND "
+         "K=1152 is below K* (~1300-1830, P10 Phase A) so quantising it would "
+         "cost time, not save it"),
+        ("linear_attn", "in_proj_ba",
+         "Gated DeltaNet decay/beta gate, N=96 not a multiple of 128 AND it is "
+         "a RECURRENT gate whose error compounds along the sequence -- stays "
+         "BF16 by design, not by shape (P10 D5)"),
+        ("linear_attn", "conv1d",
+         "the GDN depthwise conv is a 3-D tensor, not a GEMM at all; rejected "
+         "by the dim()==2 test"),
+    ],
+}
+
+
+def classify_skips(names, policy: str = "none"):
+    """Split skipped `"<layer name> <shape>"` strings by the declared policy.
+
+    Returns `(tally, unexpected)`: `tally` maps each declared pattern to the
+    names it claimed, `unexpected` is everything nothing claimed.  A non-empty
+    `unexpected` is a coverage hole and must fail the run.
+    """
+    pats = EXPECTED_SKIPS.get(policy)
+    if pats is None:
+        raise KeyError(f"unknown skip policy {policy!r}; "
+                       f"have {sorted(EXPECTED_SKIPS)}")
+    tally = {(a, b): [] for a, b, _ in pats}
+    unexpected = []
+    for nm in names:
+        for a, b, _ in pats:
+            if a in nm and b in nm:
+                tally[(a, b)].append(nm)
+                break
+        else:
+            unexpected.append(nm)
+    return tally, unexpected
+
 
 class W8A8Linear:
     """Per-channel INT8 weight + per-token dynamic INT8 activation.
@@ -79,10 +139,23 @@ class W8A8Linear:
 
     def __call__(self, x: torch.Tensor, bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         import torch_npu
-        qx, pts = torch_npu.npu_dynamic_quant(x)
+        # Flatten every leading dim, exactly as MidGroupW4A8Linear does.  On
+        # QwQ-32B every Linear saw a 2-D [tokens, K]; Qwen3.8 has 3-D callers
+        # (the vision tower and the GDN block), and a 3-D x makes
+        # npu_dynamic_quant return a 2-D pertoken_scale, which aclnnQuantMatmulV5
+        # rejects outright:
+        #   EZ0013 ... shape dim of x1Scale(pertokenScale) must be 1D
+        # vllm-ascend's own W8A8_DYNAMIC has the matching squeeze; without it
+        # this baseline simply cannot run the model, and a baseline that cannot
+        # run is worse than a slow one.
+        lead, K = x.shape[:-1], x.shape[-1]
+        x2 = x.reshape(-1, K)
+        qx, pts = torch_npu.npu_dynamic_quant(x2)
         y = torch_npu.npu_quant_matmul(qx, self.wt, self.ws, pertoken_scale=pts,
                                        output_dtype=torch.bfloat16)
-        return y if bias is None else y + bias
+        if bias is not None:
+            y = y + bias
+        return y.reshape(*lead, self.N)
 
 
 class MidGroupLinearMethod:
@@ -133,12 +206,29 @@ def patch_unquantized_linear(verbose: bool = True, arm: str = "w4a8") -> None:
     if arm == "w4a8":
         W.load()
     stock = _Target.process_weights_after_loading
-    stats = {"converted": 0, "skipped": 0, "t": 0.0, "names": [], "arm": arm}
+    stats = {"converted": 0, "skipped": 0, "t": 0.0, "names": [],
+             "skipped_names": [], "arm": arm}
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         w = getattr(layer, "weight", None)
-        if w is None or not _supported(w.data):
+        if w is None or not _supported(w.data, arm):
+            # Counted, not silent.  A "skip" here leaves the layer in BF16 and the
+            # arm stops meaning what its name says; the bench refuses to publish a
+            # run whose skipped count is non-zero (P6 D8).
+            #
+            # The NAME matters as much as the count.  On Qwen3.8-27B 39 of 154
+            # linears skip, and "39" alone cannot tell you whether that is the
+            # by-design set (vision `mlp.linear_fc1` at N=4304, the Gated DeltaNet
+            # `in_proj_ba` at N=96 -- both fail `N % 128` and both should stay
+            # BF16 anyway, P10 D5) or a real coverage hole.  Those are opposite
+            # conclusions from the same integer.
             stats["skipped"] += 1
+            # Every name, not the first 40: the full 64-layer Qwen3.8 skips 123
+            # by design and the gate below has to classify all of them.
+            if len(stats["skipped_names"]) < 4096:
+                nm = getattr(layer, "prefix", "") or "?"
+                shp = tuple(w.data.shape) if w is not None else None
+                stats["skipped_names"].append(f"{nm} {shp}")
             return stock(self, layer)
         t0 = time.perf_counter()
         name = getattr(layer, "prefix", "") or f"{tuple(w.data.shape)}"
@@ -165,12 +255,30 @@ def patch_unquantized_linear(verbose: bool = True, arm: str = "w4a8") -> None:
               "conversion happens during model load")
 
 
-def _supported(w: torch.Tensor) -> bool:
-    """The kernel's shape contract (host-side TORCH_CHECKs, mirrored here)."""
+def _supported(w: torch.Tensor, arm: str = "w4a8") -> bool:
+    """The kernel's shape contract (host-side TORCH_CHECKs, mirrored here).
+
+    K IS UNCONSTRAINED for w4a8: the op absorbs any misalignment in its own packed
+    layout (npu_ops/kernel/mg_kgeom.h).  The old `k % GROUP` test was the reason
+    every TP>1 run silently left o_proj and down_proj in BF16 -- 34% of the weights
+    of QwQ-32B, since 5120 and 27648 over any TP are not multiples of 1024.
+
+    It was worse than that for the W8A8 arm, which never had a K constraint at all
+    (`npu_dynamic_quant` + `npu_quant_matmul` are per-channel): the mid-group
+    kernel's group rule was being applied to a baseline that does not use it, so
+    `--arm w8a8 --tp 2` reported a number that was really 66% W8A8 + 34% BF16.
+    W8A8 is the DENOMINATOR of every comparison in P6.5, so that quietly biased
+    the whole phase.  Hence the per-arm split.
+    """
     if w is None or w.dim() != 2:
         return False
     n, k = w.shape
-    return (k % GROUP == 0) and (n % TILE_N == 0)
+    if k <= 0 or n <= 0:
+        return False
+    # Both arms tile N by 128 (w4a8: the kernel's TILE_N; w8a8: nothing, but
+    # keeping one rule means the two arms convert the SAME layer set, which is the
+    # entire point of routing W8A8 through this patch -- see W8A8Linear's docstring).
+    return n % TILE_N == 0
 
 
 def _iter_linears(model):

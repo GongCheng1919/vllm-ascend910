@@ -1,0 +1,1114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>mid-group W4A8 · QwQ-32B on Ascend 910B4 — 项目总报告</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1a2233;--muted:#5b6b81;--line:#e3e7ee;
+--accent:#b31e30;--accent2:#0f5ea8;--good:#1a7f4b;--warn:#b3701e;--code-bg:#f0f2f6;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+font:16px/1.7 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;}
+.wrap{max-width:1100px;margin:0 auto;padding:32px 28px 80px;}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+padding:26px 34px;margin:14px 0;box-shadow:0 1px 3px rgba(20,30,60,.06);}
+h1{font-size:27px;line-height:1.35;margin:.2em 0 .3em;}
+h1 .doc{color:var(--muted);font-weight:400;font-size:15px;display:block;margin-top:8px;}
+h2.sec{font-size:20px;margin:36px 0 8px;padding:10px 0 8px;border-bottom:3px solid var(--line);}
+h2.sec::before{content:"";display:inline-block;width:6px;height:1em;background:var(--accent);
+margin-right:10px;border-radius:2px;vertical-align:-2px;}
+h3{font-size:17px;margin:26px 0 6px;}
+h4{font-size:15px;margin:18px 0 4px;}
+p{margin:10px 0;}
+a{color:var(--accent2);text-decoration:none;}
+a:hover{text-decoration:underline;}
+code{background:var(--code-bg);border-radius:4px;padding:1px 5px;font-size:.9em;
+font-family:ui-monospace,SFMono-Regular,Consolas,monospace;}
+pre.code{background:#0f172a;color:#e2e8f0;border-radius:8px;padding:14px 16px;
+overflow-x:auto;font-size:13px;line-height:1.55;}
+blockquote{margin:12px 0;padding:10px 16px;border-left:4px solid var(--accent2);
+background:#f0f6fc;border-radius:0 8px 8px 0;color:var(--muted);font-size:.93em;}
+ul,ol{padding-left:24px;margin:8px 0;}
+li{margin:5px 0;}
+strong,b{color:var(--ink);}
+.tblwrap{overflow-x:auto;margin:14px 0;}
+table{border-collapse:collapse;width:100%;font-size:14px;background:#fff;}
+th{background:#f0f3f8;text-align:left;padding:8px 12px;border:1px solid var(--line);
+font-weight:600;white-space:nowrap;}
+td{padding:7px 12px;border:1px solid var(--line);vertical-align:top;}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;}
+tbody tr:nth-child(even){background:#fafbfd;}
+.win{color:var(--good);font-weight:700;}
+.lose{color:var(--accent);font-weight:700;}
+.flat{color:var(--muted);}
+figure{margin:22px 0;text-align:center;}
+figure img{max-width:100%;border:1px solid var(--line);border-radius:8px;box-shadow:0 2px 8px rgba(20,30,60,.08);}
+figcaption{color:var(--muted);font-size:13px;margin-top:8px;text-align:left;}
+.nav{background:#0f172a;color:#e2e8f0;padding:14px 0;position:sticky;top:0;z-index:9;}
+.nav .wrap{display:flex;gap:16px;align-items:baseline;padding:0 28px;flex-wrap:wrap;}
+.nav .brand{font-weight:700;color:#fff;}
+.nav a{color:#9fb3c8;font-size:13px;}
+.nav a:hover{color:#fff;}
+.banner{border-left:6px solid var(--accent);background:#fdf1f2;
+border-radius:0 8px 8px 0;padding:12px 18px;margin:12px 0;font-size:.95em;}
+.banner.ok{border-left-color:var(--good);background:#eefaf3;}
+.banner.info{border-left-color:var(--accent2);background:#f0f6fc;}
+.banner.warn{border-left-color:var(--warn);background:#fdf6ec;}
+small{color:var(--muted);}
+.toc{columns:2;column-gap:32px;}
+.toc a{display:block;padding:3px 0;color:var(--muted);font-size:14px;}
+.toc a.l1{font-weight:600;color:var(--ink);margin-top:8px;break-inside:avoid;}
+.kpi{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0;}
+.kpi .k{flex:1 1 160px;border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:#fbfcfe;}
+.kpi .k .v{font-size:24px;font-weight:700;line-height:1.2;font-variant-numeric:tabular-nums;}
+.kpi .k .l{font-size:12px;color:var(--muted);margin-top:4px;line-height:1.45;}
+.kpi .k.g .v{color:var(--good);} .kpi .k.r .v{color:var(--accent);} .kpi .k.b .v{color:var(--accent2);}
+.bars{margin:16px 0;font-size:13px;}
+.bars .row{display:flex;align-items:center;gap:10px;margin:5px 0;}
+.bars .lab{width:70px;text-align:right;color:var(--muted);flex:none;font-variant-numeric:tabular-nums;}
+.bars .track{flex:1;background:#eef1f6;border-radius:4px;height:20px;position:relative;}
+.bars .fill{display:block;height:100%;border-radius:4px;}
+.bars .fill.a{background:#0f5ea8;} .bars .fill.b{background:#7aa8d2;}
+.bars .fill.c{background:#b31e30;} .bars .fill.d{background:#d98a94;}
+.bars .val{width:52px;font-variant-numeric:tabular-nums;color:var(--ink);flex:none;}
+.bars .one{position:absolute;top:-3px;bottom:-3px;width:2px;background:#94a3b8;}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin:8px 0 4px 80px;}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:5px;vertical-align:-1px;}
+.stage{display:flex;gap:0;flex-wrap:wrap;margin:18px 0;}
+.stage .s{flex:1 1 120px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:4px;background:#fbfcfe;}
+.stage .s .n{font-size:12px;color:var(--muted);}
+.stage .s .t{font-weight:600;font-size:14px;margin:2px 0 4px;}
+.stage .s .r{font-size:12.5px;line-height:1.5;}
+.stage .s.done{border-left:4px solid var(--good);}
+.stage .s.hold{border-left:4px solid var(--warn);}
+.stage .s.open{border-left:4px solid var(--muted);}
+</style>
+</head>
+<body>
+
+<div class="nav"><div class="wrap">
+<span class="brand">mid-group W4A8 · QwQ-32B · Ascend 910B4</span>
+<a href="#s1">结论</a><a href="#s2">口径</a><a href="#s3">方案</a><a href="#s4">kernel</a>
+<a href="#s5">层级/引擎</a><a href="#s6">e2e 并行</a><a href="#s7">精度</a>
+<a href="#s8">通信</a><a href="#s9">部署建议</a><a href="#s10">欠账</a>
+</div></div>
+
+<div class="wrap">
+
+<div class="card">
+<h1>mid-group W4A8 在 vLLM 上的端到端推理：项目总报告
+<span class="doc">目标模型 QwQ-32B（64 层 / hidden 5120 / inter 27648）· 硬件 Ascend 910B4 ×8 · CANN 8.5.0 ·
+vLLM v0.13.0 + vllm-ascend · torch 2.8.0 + torch_npu 2.8.0.post2<br/>
+覆盖 P0–P8（2026-08-10 → 2026-08-19）· 执行记录 <code>MGCKPT/</code> · 分期报告 <code>reports/midgroup/</code> ·
+数据 <code>int4_cube_lab/results/</code><br/>
+报告生成日期 2026-08-31</span></h1>
+
+<div class="banner"><b>这份报告只报延迟，不报可用性。</b>两条限定贯穿全文，先读它们再读任何数字：
+<b>（1）全部性能数字跑在随机权重上</b>（<code>load_format=dummy</code>，真实校准 checkpoint 的导出器至今未做）；
+<b>（2）P2 精度门禁没有通过</b>——PPL 过了（+3.52% vs W8A8），但唯一测过的任务指标 GLUE 是
+<b>asym vs W8A8 平均 −4.5 个百分点</b>（cola −11.7 / qqp −13.0）。
+P2/P3/P4 并行是 2026-08-13 的明示决策，<b>不是「P2 已通过」</b>。</div>
+</div>
+
+<div class="card">
+<h2 class="sec" id="s1" style="margin-top:6px">1 · 一句话回答：现在能做端到端高效推理了吗？</h2>
+
+<p><b>能，但只在一个被实测钉死的区间里，而且这个区间由并行形态决定。</b></p>
+
+<div class="kpi">
+<div class="k g"><div class="v">2.0–2.2×</div><div class="l">真实 64 层 QwQ-32B，<b>PP=4</b> 解码 vs 原生 BF16<br/>batch ≤ 64，零 kernel 改动</div></div>
+<div class="k g"><div class="v">≈1.1×</div><div class="l">同上，vs <b>我们自己的</b> W8A8（同一份权重、同一钩子、同一批 64 个 linear）</div></div>
+<div class="k b"><div class="v">2.05×</div><div class="l">8K 长上下文解码仍保持；五条 arm 里<b>劣化最小</b>（+9.6%，BF16 是 +8.2%）</div></div>
+<div class="k r"><div class="v">1.16×</div><div class="l"><b>TP=4</b> 解码 batch=1 vs BF16 —— PP 上的 2.0–2.2× 在这里塌掉</div></div>
+<div class="k r"><div class="v">0.64–0.69×</div><div class="l"><b>prefill</b> vs 我们的 W8A8（PP 口径，八个点方向一致）</div></div>
+<div class="k r"><div class="v">0.86–0.91×</div><div class="l"><b>batch≥256</b> 解码 vs 我们的 W8A8，三个 PP 上方向一致</div></div>
+<div class="k g"><div class="v">3.5×</div><div class="l"><b>权重压缩</b> 62 GB → <b>19 GB</b>（磁盘实测）；64 GB 单卡上 BF16 装不下而它装得下</div></div>
+<div class="k g"><div class="v">1.6×</div><div class="l"><b>单卡 KV 容量</b> vs 我们的 W8A8（159 K vs 100 K tokens）</div></div>
+</div>
+
+<h3>1.1 可用性判定表（按场景，全部为实测，不外推）</h3>
+<div class="tblwrap"><table>
+<thead><tr><th>场景</th><th>结论</th><th>选哪条</th><th>依据</th></tr></thead>
+<tbody>
+<tr><td>解码 · PP=4 · batch ≤ 64</td><td class="win">✅ 可用，收益显著</td><td><b>我们的 W4A8</b></td><td>2.0–2.2× BF16 / ~1.1× 我们的 W8A8（§6.1）</td></tr>
+<tr><td>解码 · PP=4 · 长上下文 8K</td><td class="win">✅ 可用，且最抗上下文</td><td><b>我们的 W4A8</b></td><td>2.05× BF16，劣化 +9.6%（§6.2）</td></tr>
+<tr><td>解码 · PP=4 · batch ≥ 256</td><td class="lose">❌ 负收益</td><td>我们的 W8A8</td><td>0.86–0.91×（§6.3）</td></tr>
+<tr><td><b>解码 · TP=4</b></td><td class="flat">⚠ 打平，进噪声带</td><td>无差别 / 看 prefill 需求</td><td>batch=1 1.16×、batch≥64 进 ±5%、batch≥128 输给自己的 W8A8（§6.4）</td></tr>
+<tr><td>Prefill · PP=4</td><td class="lose">❌ 一致地输</td><td>我们的 W8A8</td><td>0.64–0.69×，八点全一致（§6.2）</td></tr>
+<tr><td>Prefill · TP=4</td><td class="flat">⚠ 打平</td><td>无差别</td><td>0.96–0.99× BF16 / 0.90× 我们的 W8A8（§6.4）</td></tr>
+<tr><td>用多卡换<b>延迟</b></td><td class="lose">❌ 目前做不到</td><td>—</td><td>PP 只给容量（§6.1.4）；TP 打平（§6.4）</td></tr>
+<tr style="background:#eefaf3"><td><b>单卡 / 省卡部署（容量约束）</b></td><td class="win">✅ 能力级收益</td><td><b>我们的 W4A8</b></td><td>权重 19 GB，BF16（65.5 GB）在 64 GB 卡上装不下（§7）</td></tr>
+<tr><td>多卡 prefill 提吞吐（FSDP / CP）</td><td class="flat">⚠ 方向对，未验证</td><td>待原型</td><td>切 M 保 K，避开 K*；但 prefill M 仍 ≫512 ⇒ 只能打平（§11）</td></tr>
+<tr><td>任何对<b>输出质量</b>有要求的场景</td><td class="lose">❌ 未验证</td><td>—</td><td>P2 门禁未过 + 随机权重（§8）</td></tr>
+</tbody></table></div>
+
+<h3>1.2 一句话机理：为什么 PP 行、TP 不行</h3>
+<div class="banner info"><b>W4A8-mg 的收益域是「小 M × 大 K」，TP 切 K 把 o_proj 切出了这个域。</b>
+把 o_proj 的 kernel 耗时拟成 <code>固定开销 + K·斜率</code>（P7 D2）：<b>斜率比 0.60（M=16）</b>，理论值 0.5 ——
+<b>访存优势完好无损</b>；塌掉的是<b>固定开销</b>（+2.5 µs）。交叉点 <code>K* = 固定差 / 斜率差</code>，
+M=16 时 <b>K* = 1665</b>。<br/>
+⇒ PP 不切 K（<code>o=5120</code>、<code>down=27648</code>，两层都在收益域内）⇒ 2.0–2.2×；
+TP=4 把 <code>o_proj</code> 切到 <b>K=1280 &lt; K*</b> ⇒ 跌出收益域（实测 1.066，输）。
+<b>这把「PP 行 TP 不行」从现象变成了机理。</b></div>
+
+<h3>1.3 全项目阶段一览</h3>
+<div class="stage">
+<div class="s done"><div class="n">P0</div><div class="t">可行域与代价</div><div class="r">GK=1024 是唯一现实选项；GK=512 约打平、256 出局</div></div>
+<div class="s done"><div class="n">P1</div><div class="t">fake-quant harness</div><div class="r">RTN 对称出局（+9.03%）；<b>非对称把缺口收到 +3.56%</b></div></div>
+<div class="s hold"><div class="n">P2</div><div class="t">精度门禁</div><div class="r"><b>暂缓，未通过</b>：PPL 过、GLUE −4.5 点；GPTQ 无增益</div></div>
+<div class="s done"><div class="n">P3</div><div class="t">kernel 实现</div><div class="r">decode 1.51–1.53× vs W8A8（含量化）；正确性/压测/负对照全过</div></div>
+<div class="s done"><div class="n">P4</div><div class="t">接入 vLLM</div><div class="r">每层 408 µs @batch=1 = <b>2.63× BF16</b>；<code>FULL_DECODE_ONLY</code> 值 2 倍</div></div>
+<div class="s done"><div class="n">P5</div><div class="t">GEMM 优化消融</div><div class="r">大 M 冲刷税是<b>结构性</b>的；按冲刷次数收费不按字节</div></div>
+<div class="s done"><div class="n">P6</div><div class="t">PP 部署</div><div class="r"><b>已交付</b>：真实 64 层 PP=4，2.0–2.2×，零 kernel 改动</div></div>
+<div class="s done"><div class="n">P6.5</div><div class="t">TP + ragged-K</div><div class="r">ragged-K 交付；<b>TP=4 矩阵出完但只有 1.16×</b>；自研 all-reduce 15× HCCL</div></div>
+<div class="s open"><div class="n">P7</div><div class="t">低维度 kernel</div><div class="r">进行中：D2 定出收益域与 K*；靶子是把 K* 压到 1280 以下</div></div>
+<div class="s open"><div class="n">P8</div><div class="t">通信 kernel</div><div class="r">未开工（支线）：算子已验完定完价，只剩接进 vLLM</div></div>
+</div>
+</div>
+
+<div class="card">
+<h2 class="sec" id="s2">2 · 口径 —— 先读这一节，否则数字会读错</h2>
+
+<h3>2.1 引擎级噪声带：<b>±15%（最坏）</b></h3>
+<p><code>p6_pp_isorank*.csv</code> + <code>p6_pp_concurrency.csv</code> 共 <b>60 个重复测点</b>：</p>
+<div class="tblwrap"><table>
+<thead><tr><th>量</th><th class="num">median</th><th class="num">p90</th><th class="num">最坏</th></tr></thead>
+<tbody>
+<tr><td>绝对 <code>step_us</code></td><td class="num">1.8%</td><td class="num">7.2%</td><td class="num"><b>15.0%</b></td></tr>
+<tr><td>比值（各自轮内算完再跨轮比）</td><td class="num">3.1–5.2%</td><td class="num">—</td><td class="num"><b>17.1%</b></td></tr>
+</tbody></table></div>
+<div class="banner"><b>比值并不能抵消漂移</b>——两轮之间同一条比值最坏能差 17%。直接后果：
+<b>小于 5% 的单点差异在本报告中一律不作数</b>，只有在多个 batch / 并行度 / 上下文上<b>方向一致</b>的模式才当结论；
+比值一律按两位有效数字读（「约 2.0×」，不是「2.08×」）。<br/>
+⚠ 全部配置<b>单次跑</b>，路线图要求的「≥3 次重复 + 离散度」<b>从未做过</b>，已排进 P7 第 0 项（§12.1）。</div>
+
+<h3>2.2 五条 arm 分别是什么，以及<b>它们并不对等</b></h3>
+<div class="tblwrap"><table>
+<thead><tr><th>arm</th><th>权重来源</th><th>量化路径</th><th>覆盖的层</th></tr></thead>
+<tbody>
+<tr><td><code>bf16</code></td><td><code>models/QwQ-32B</code></td><td>无</td><td>—</td></tr>
+<tr><td><code>w8a8-native</code></td><td><code>models/QwQ-32B-W8A8</code></td><td>vllm-ascend 自带</td><td class="lose">缺全部 64 个 down_proj（标 <code>FLOAT</code>）</td></tr>
+<tr><td><code>w4a8-native</code></td><td><code>models/QwQ-32B-W4A8-Random</code></td><td>vllm-ascend 自带</td><td>四种投影，但是 <b>weight-only</b></td></tr>
+<tr><td><code>w8a8</code>（我们）</td><td>同 <code>models/QwQ-32B</code> 转换</td><td>per-channel INT8 + per-token</td><td>四种投影</td></tr>
+<tr><td><b><code>w4a8</code>（我们）</b></td><td>同 <code>models/QwQ-32B</code> 转换</td><td><b>mid-group GK=1024 非对称</b></td><td>四种投影</td></tr>
+</tbody></table></div>
+<ul>
+<li><b><code>w8a8-native</code> 不是对等的 W8A8。</b> 其 <code>quant_model_description.json</code> 把全部 64 个
+<code>down_proj</code>（层内最大的 GEMM，K=27648）标成 <code>FLOAT</code>，运行时证据吻合（每 rank 8 个 linear 中
+6 个 <code>AscendLinearMethod</code> + 2 个 <code>AscendUnquantizedLinearMethod</code>）。
+<b>「我们的 W8A8 比原生快」主要来自量化的层集不同，不是 kernel 更快。</b></li>
+<li><b><code>w4a8-native</code> 是 weight-only</b>：<code>npu_weight_quant_batchmatmul</code> 把 int4 反量化成 bf16 再算，
+激活的 int8 <b>从未进入 cube</b>。它在大 batch 比 BF16 还慢是结构性的，不是「W4A8 慢」。</li>
+<li><b>只有 <code>w8a8</code> / <code>w4a8</code> 这一对的比值干净地隔离了 GEMM</b>——同一份 BF16 权重、同一个
+<code>process_weights_after_loading</code> 钩子、同一组 64 个 linear。</li>
+</ul>
+
+<h3>2.3 每条 arm 都有「主动查询」的生效证据</h3>
+<div class="banner warn"><b>日志的缺席不是证据。</b>转换日志每 64 次才打一行，父进程计数器在多 rank 下天然是 0
+——2026-08-15 的 PP=4 就是这么被当成 W4A8 测的，<b>实际全程 BF16</b>。本项目此后两道证据都是主动查询返回值：
+<code>collective_rpc</code> 逐 rank 查转换数（PP=4/L=64 每 rank <code>converted=64</code>，任一 rank 为 0 直接拒绝出数）；
+<code>apply_model</code> 逐 rank 查每个 Linear 的 <code>quant_method</code> 类名（<b>这条对五条 arm 都生效</b>，
+<code>w8a8-native</code> 的 down_proj 缺口就是这么发现的）。</div>
+
+<h3>2.4 三个曾经让结论反号的计时陷阱（P4 的主要工作量）</h3>
+<div class="tblwrap"><table>
+<thead><tr><th>陷阱</th><th>错在哪</th><th>正确做法</th></tr></thead>
+<tbody>
+<tr><td><b>eager 计时</b></td><td>batch ≤ 16 量的是 python 下发不是设备；量化路径每投影多 3–4 次下发，<b>必然显得更慢</b></td><td>图捕获后 replay</td></tr>
+<tr><td><b>手搭图 ≠ 引擎图</b></td><td><code>torch.npu.NPUGraph</code> 不经过 dynamo，量不到 python 分支被折掉的问题</td><td>在真引擎里量</td></tr>
+<tr><td><b>默认图模式</b></td><td>vllm-ascend 默认 <code>PIECEWISE</code>，每层被 attention 切开、段间跑 python，<b>白亏 2 倍</b></td><td>显式传 <code>FULL_DECODE_ONLY</code></td></tr>
+</tbody></table></div>
+<p><small>⚠ 显式传 <code>FULL_AND_PIECEWISE</code> 会被<b>静默降级成 PIECEWISE</b>，NPU 上必须写 <code>FULL_DECODE_ONLY</code> 或 <code>FULL</code>。</small></p>
+
+<h3>2.5 两条方法学规矩（都由踩坑立下）</h3>
+<blockquote><b>一、任何「X 比 Y 快/慢」的结论必须带 M 档。</b>本课题里 weight-only / mid-group / per-channel
+三条路的排序<b>在 M 上会换位</b>。消融同理：<b>M=16 的消融不能说明 M=512</b>（P4 §7.2，同一个单点外推错误犯了两次）。<br/>
+<b>二、每加一个修正项，配一个故意写错的负对照。</b>没有负对照，「PASS 116 dB」只能证明两边一致，不能证明两边正确（P3 §3.4）。</blockquote>
+
+<h3>2.6 其它口径</h3>
+<ul>
+<li><b>PP 主表固定「每卡层数」不是总层数</b>：<code>PP=1→L16 / PP=2→L32 / PP=4→L64</code>，每 rank 权重占用一致（~14 GB），
+<b><code>PP=4 / L=64</code> 就是真实的 64 层 QwQ-32B</b>。方法有效性的正向证据：改成固定每卡层数后，
+BF16 的每层斜率变成 <b>1071 / 1084 / 1117 µs</b>（PP=1/2/4）——一个理论上应该是常数的量真的是常数。</li>
+<li><b>P4 报的是每层斜率，不是端到端比值</b>：跑 4 层与 16 层差分除以 12，扣掉每步 ~4.1 ms 固定开销
+（大头是 lm_head 152064×5120 bf16 = 1.56 GB/解码步，不被任何 arm 接管，留在分母里会把所有比值往 1 拉）。
+同一次测量：16 层端到端 1.19×、外推 64 层约 1.26×、每层斜率 1.32×。</li>
+<li><b>长上下文的解码与 prefill 必须分开测</b>：<code>step_us</code> 的 warmup 与计时跑同一批 prompt 且 prefix caching 开着
+⇒ 计时那一跑复用前缀 KV、几乎不付 prefill，<b>即使 plen=8192 也是纯解码量</b>；prefill 由
+<code>--prefill-probe</code> 用<b>全新 prompt</b> 的 <code>max_tokens=1</code> 单独测。</li>
+<li>环境固定 <code>ASCEND_RT_VISIBLE_DEVICES</code> 从 1 号卡起排（device 0 已挂死）。</li>
+</ul>
+</div>
+
+<div class="card">
+<h2 class="sec" id="s3">3 · 方案：mid-group W4A8 是什么</h2>
+
+<h3>3.1 量化定义</h3>
+<p>沿 K 方向把长度 <code>K</code> 切成 <code>K/GK</code> 个组，<b>A 和 W 用同一组边界</b>：</p>
+<pre class="code">y[m,n] = Σ_g  as[m,g] · ws[n,g] · ( Σ_{k∈g} A_q[m,k] · W_q[n,k] )
+
+A_q: [M,K] int8,  as: [M, K/GK] bf16     (per-token × per-group，动态)
+W_q: [N,K] int4,  ws: [N, K/GK] bf16     (per-channel × per-group)</pre>
+<p>W 和 A 用同一种量化方案（而不是「A per-token + W mid-group」混搭）是刻意的：两侧在同一个边界 rescale，
+kernel 里只有一套冲刷逻辑。<b>scale 一律 bf16 且先 round 到 bf16 再用它量化</b>——kernel 里就是 bf16，
+用 fp32 scale 做 fake quant 会系统性高估精度。</p>
+
+<h3>3.2 为什么必须做 MSD 拆分</h3>
+<p><code>kernel_operator_mm_impl.h:317</code> 的 <code>MmadCal</code> 只接受两种整型组合：
+<code>&lt;int32,int8,int8&gt; → mad</code> 与 <code>&lt;int32,int4b_t,int4b_t&gt; → mad_s4</code>。
+<b>cube 没有 s8×s4 混合位宽指令。</b>所以「A 8bit、W 4bit」只有两条路：把 W 升到 int8（访存收益归零，纯亏），
+或把 A 拆成两个 int4 平面走 <code>mad_s4</code>。</p>
+<pre class="code">a = 16*h + l + 8,   h = a >> 4        ∈ [-8,7]
+                    l = (a & 15) ^ 8  ∈ [-8,7]      # 对全部 256 个 int8 值精确，不需要 clamp
+
+C[m,n] = 16·Σ h·w + Σ l·w + 8·Σ_k W[n,k]
+                             └── w_ksum，权重侧一次性预处理，推理零成本</pre>
+<p><b>拆分沿「数值位」、分组沿 K，两者正交</b>，所以 mid-group 不需要重新设计拆分——唯一的变化是
+<code>w_ksum</code> 从 <code>[N]</code> 变成 <code>[N, K/GK]</code>。
+<b>MSD 拆分对精度零影响</b>（int32 内精确累加），fake quant 按 int8 激活建模即可。</p>
+
+<h3>3.3 非对称权重（GK=1024 的救命项）</h3>
+<p>P1 实测非对称权重把 PPL 缺口从 +9.03% 收到 +3.56%（§7），代价是每组多一个<b>激活行和</b>：</p>
+<pre class="code">y[m,n] = Σ_g as[g,m]·ws[g,n]·( 16·S_hi + S_lo + 8·w_ksum[g,n] − wz[g,n]·a_ksum[g,m] )</pre>
+<div class="banner warn"><b>两个容易写错、且不会报错的地方：</b>
+<b>（1）<code>w_ksum</code> 不减零点</b>——它来自 MSD 的 <code>+8</code> 偏置，与非对称无关；零点走独立的 <code>wz·a_ksum</code> 项。
+两者形状相同、来源无关，混用只掉 SNR 不报错。
+<b>（2）<code>a_ksum</code> 必须是 int32，不能是 bf16</b>——GK=1024 的行和达 ~1.3e5，bf16 的 8 位尾数会舍到 ~0.2%，
+零点项与主项同量级，误差直接落到输出。对照：<code>wz</code> 留 bf16 是安全的（<code>[-8,7]</code> 的整数，bf16 精确）。
+<b>判据是「这个量能否被 bf16 精确表示」，不是「它是不是 scale 类的量」。</b></div>
+<p>而<b>非对称本身几乎不要钱</b>：同协议 sym/asym A/B 在 decode 档 <code>asym/sym = 1.002–1.006</code>，
+最贵的是 M=64 的 1.031（<code>BATCH_G</code> 32→21 所致，不是那条额外的向量指令）。<b>非对称不是性能上的取舍点。</b></p>
+</div>
+
+<div class="card">
+<h2 class="sec" id="s4">4 · 第一层：kernel</h2>
+
+<h3>4.1 地基：910B4 的 INT4 cube 确实是 INT8 的 2×</h3>
+<p>项目起点是一个怀疑：vllm 上 W8A8/W4A8 与 BF16 没有显著差距，那它们到底走没走 int8 cube？
+先手写 per-channel W4A8 把地基砸实（<code>int4_cube_lab/REPORT_W4A8.md</code>）：</p>
+<div class="banner ok"><b>W4A8 不但达到了 W8A8，还全面超过它</b>：Qwen3-32B 的 MLP 形状上，M=1..16（decode）快
+<b>1.65–1.88×</b>，M=1024（prefill）快 <b>1.57–1.62×</b>；且在 M ≤ 16 时只比纯 W4A4 慢 3–8%。
+同一套流水、同一份 host harness、同样 tile 几何下的对照。
+实现用 <b>stacked-A</b>：h/l 两平面沿 M 叠成 <code>2·TILE_M</code> 的 cube tile，一条 Mmad、一个 L0C、一次 Fixpipe。</div>
+
+<h3>4.2 P0：GK 的代价表 —— 为什么冻结 GK=1024</h3>
+<p>探针 kernel 只改流水不改数学（scale 全取 1，结果与 per-channel 逐位/高 SNR 一致），
+在 QwQ-32B 真实形状上扫 GK。以 <code>gate_up</code> M=1 为例（cold，µs）：</p>
+<div class="tblwrap"><table>
+<thead><tr><th></th><th class="num">W8A8</th><th class="num">W4A8 pc</th><th class="num">g1024</th><th class="num">g512</th><th class="num">g256</th></tr></thead>
+<tbody>
+<tr><td>gate_up M=1</td><td class="num">248.1</td><td class="num">132.1</td><td class="num"><b>185.5</b></td><td class="num">362.5</td><td class="num">586.2</td></tr>
+<tr><td>相对 pc</td><td class="num">—</td><td class="num">1.00×</td><td class="num"><b>1.40×</b></td><td class="num">2.74×</td><td class="num">4.44×</td></tr>
+</tbody></table></div>
+<div class="banner"><b>结论：<code>GK=1024</code> 是唯一现实选项</b>（decode 档相对 per-channel W8A8 仍有 1.15–1.40× 优势）；
+<code>GK=512</code> 约打平（1.54–2.57× pc）；<code>GK=256</code> 出局（2.4–4.1× pc）。
+<b>归因：不是带宽、不是握手，是 AIV 每组固定的指令发射开销</b>——TILE_M=16 时每次额外冲刷 0.5–1.1 µs，
+而那时 AIV 每组只处理 1024 个元素，数据量微不足道，是纯固定开销。
+<b>这条固定开销后来贯穿整个项目</b>（P3 §4.3、P4 §5.2、P5 结项、P7 D2 都是它）。</div>
+<p>候选集不是自由参数：QwQ-32B 的 K 只有 5120 与 27648，<code>GK=2048</code> 两个都除不尽，直接排除。</p>
+
+<h3>4.3 P3：正确性门禁（这一节决定后面的性能数字值不值钱）</h3>
+<div class="tblwrap"><table>
+<thead><tr><th>门禁</th><th>覆盖</th><th>结果</th></tr></thead>
+<tbody>
+<tr><td>逐 shape 比对（真实 per-group scale + 真实零点）</td><td>QwQ-32B 四种 Linear × M ∈ {16,64}</td><td class="win">SNR 91.66 – 139.56 dB（门槛 40）</td></tr>
+<tr><td>race 压测（tile 数 &gt; blockDim）</td><td>m16 / m64 / m128 三个 build</td><td class="win">各 30/30 PASS</td></tr>
+<tr><td>与算法的<b>接缝</b>（fakequant_lab 驱动）</td><td>tileM 16 / 64 / 128</td><td class="win">8192/8192 逐位；SNR 174–336 dB</td></tr>
+<tr><td>激活量化 kernel 四个输出</td><td>M ∈ {1,16,64,1024} × K ∈ {5120,27648}</td><td class="win"><b>逐字节相同</b>（整数产物用逐字节不用 SNR）</td></tr>
+<tr><td><b>负对照</b>：<code>a_ksum</code> 符号翻转</td><td>—</td><td class="lose">−3.26 dB FAIL ✓（该失败就失败）</td></tr>
+<tr><td><b>负对照</b>：asym 数据喂 sym build</td><td>—</td><td class="lose">9.78 dB ✓</td></tr>
+<tr><td>ragged-K：补零的 int32 精确性</td><td>纯 host，零容差</td><td class="win">逐位精确；对齐形状与旧打包器逐字节相同</td></tr>
+<tr><td>ragged-K：lab + torch 全链路</td><td>按机制分块的 15 形状 + 13 个 K</td><td class="win"><b>62/62 + 65/65</b></td></tr>
+<tr><td>接入 vLLM 后的逐位回归（对改动前的 <code>.so</code>）</td><td>3 形状 × 14 个 M（含 ragged）</td><td class="win"><b>42/42 逐位相同</b></td></tr>
+</tbody></table></div>
+<p><small>CPU 参考按<b>定义</b>计算 <code>Σ_k A·(W − wz)</code>，<b>不用 kernel 的 rank-1 恒等式</b>——用了的话符号写反会两边一起错，检查是循环的。</small></p>
+
+<h3>4.4 P3：kernel 级性能（QwQ-32B 四种 Linear 之和，µs，cold，median-of-3）</h3>
+<p><code>quant</code> = 每层的激活量化开销：3×(K=5120) + 1×(K=27648)。
+<b>最后一列给 W8A8 也记了同一份量化开销</b>（它的 GEMM 同样吃 int8 激活）——不给它记账会把 W4A8 的优势夸大。</p>
+<div class="tblwrap"><table>
+<thead><tr><th class="num">M</th><th class="num">W8A8</th><th class="num">W4A8 pc</th><th class="num">mg1024-asym</th><th class="num">quant</th><th class="num">asym+quant</th><th class="num">仅 GEMM</th><th class="num">含 quant</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td class="num">446.9</td><td class="num">257.2</td><td class="num"><b>282.2</b></td><td class="num">28.4</td><td class="num">310.6</td><td class="num">1.58×</td><td class="num win">1.53×</td></tr>
+<tr><td class="num">4</td><td class="num">443.6</td><td class="num">257.7</td><td class="num"><b>283.5</b></td><td class="num">28.9</td><td class="num">312.4</td><td class="num">1.56×</td><td class="num win">1.51×</td></tr>
+<tr><td class="num">16</td><td class="num">444.8</td><td class="num">258.6</td><td class="num"><b>281.9</b></td><td class="num">37.3</td><td class="num">319.2</td><td class="num">1.58×</td><td class="num win">1.51×</td></tr>
+<tr><td class="num">64</td><td class="num">513.3</td><td class="num">327.5</td><td class="num"><b>387.9</b></td><td class="num">51.1</td><td class="num">439.0</td><td class="num">1.32×</td><td class="num">1.29×</td></tr>
+<tr><td class="num">128</td><td class="num">642.1</td><td class="num">495.5</td><td class="num"><b>545.1</b></td><td class="num">73.9</td><td class="num">619.0</td><td class="num">1.18×</td><td class="num">1.16×</td></tr>
+<tr><td class="num">512</td><td class="num">2075.7</td><td class="num">1348.0</td><td class="num"><b>1844.2</b></td><td class="num">218.2</td><td class="num">2062.4</td><td class="num">1.13×</td><td class="num flat">1.11×</td></tr>
+<tr><td class="num">1024</td><td class="num">4042.1</td><td class="num">2598.1</td><td class="num"><b>3711.3</b></td><td class="num">417.3</td><td class="num">4128.6</td><td class="num">1.09×</td><td class="num flat">1.08×</td></tr>
+</tbody></table></div>
+<p><b>路线图 Exit Criteria（decode 档延迟低于同结构 W8A8 kernel）：M ∈ {1,4,16} 达到 1.51–1.53×，满足。</b>
+但 M=64 降到 1.29×、M=128 到 1.16×，<b>优势快速收窄</b>。</p>
+<p><b>逐投影看，prefill 档 <code>qkv</code> / <code>o</code> 实际上比 W8A8 慢</b>（M=1024 分别 0.76× / 0.79×）：
+它们 N 小、K 小，mid-group 的每组冲刷摊不开（<code>asym/pc</code> 到 1.45–1.47×）。合计仍 &gt;1 是靠
+<code>gate_up</code> / <code>down</code> 撑着（1.11× / 1.19×）。<b>这是 §6.2 prefill 输的 kernel 级根因，早在 P3 就看到了。</b></p>
+
+<h3>4.5 mid-group 相对 per-channel 的税，以及它<b>不是</b>架构上限</h3>
+<div class="tblwrap"><table>
+<thead><tr><th>M</th><th class="num">1–16</th><th class="num">64</th><th class="num">128</th><th class="num">512</th><th class="num">1024</th></tr></thead>
+<tbody><tr><td>mid-group 相对 per-channel int4 的税</td><td class="num">1.05–1.12×</td><td class="num">1.10–1.25×</td><td class="num">1.05–1.20×</td><td class="num lose">1.34–1.42×</td><td class="num lose">1.42–1.47×</td></tr></tbody></table></div>
+<div class="banner ok"><b>关键对照：M=1024 时 mid-group 对 W8A8 是 0.76×（qkv，输），但 per-channel int4 对 W8A8 是 1.12×（仍然赢）。</b>
+per-channel int4 同样做 MSD 拆分，只是没有分组冲刷。⇒ <b>int4 cube 的 2 倍吞吐确实抵掉了 MSD 的两次 MAD，架构是对的</b>；
+输的是每个量化组一次 workspace 往返（G = K/1024 = 5~27 次，per-channel 只有 1 次）。
+小 M 时 DMA 受限把它藏住，大 M 时 cube 忙起来就露出来。
+<b>因此应当修 kernel，而不是做「按 M 分派」</b>——分派需要同时保留两份权重，与「转换后丢掉 bf16」的内存收益直接冲突。</div>
+
+<h3>4.6 P5：六条优化路，只有一条有净收益</h3>
+<p>P5 对大 M 的分组冲刷税做了定向消融，结论是<b>结构性代价</b>：</p>
+<ul>
+<li><b>成本模型：按「冲刷次数 / 行数」收费，不按字节体积。</b>调度类改动全部 ≤5%；窄化字节反而 +1.5~6.2%。</li>
+<li>删掉 Fixpipe 能<b>整个</b>抹掉大 M 的 mid-group 税 —— 但「删除 X 有帮助」≠「重叠 X 有帮助」，
+调度修复与字节削减两条都只值 5% 以内。</li>
+<li>六条路只有 <b>L2 分带</b>（<code>BAND_N_CFG</code>）有净收益：prefill −2~4.6%，<b>逐位一致，零成本</b>，但<b>至今未设默认</b>。</li>
+<li>默认保持 int32 累加 / 下发（<code>BF16_FLUSH_CFG</code> 非逐位一致，禁止设默认）。</li>
+</ul>
+
+<h3>4.7 ragged-K：把 <code>K % 1024 == 0</code> 从契约里拿掉</h3>
+<p>原 TP 路线是 <code>GK = 1024/TP</code>（TP=2→512、TP=4→256），它数值上成立但<b>性能上必死</b>——正是 P0 那条代价曲线。
+决定性旁证是 P6 自己的数据：列并行 eff@2 0.92–1.07、eff@4 0.77–1.06 <b>几乎完美</b>，列并行切 N，
+字节照样按 TP 减少，唯一区别是 <b>GK 没变</b>。</p>
+<blockquote>不是「TP 缩放不了」，是<b>「GK 缩小」缩放不了</b>。⇒ 不缩 GK，让算子原生吃任意 K。底层问题底层解决。</blockquote>
+<pre class="code">G       = ceil(K / GK)
+n_g     = min(GK, K - g*GK)          # 第 g 组真实元素数
+n_g_pad = ceil(n_g / 64) * 64        # 补到一个 int4 cube fractal（C0 = 32 B = 64 元素）
+offset  = g * ceil(GK / 64)</pre>
+<p>每组独立补齐 ⇒ 每组都从 fractal 边界开始、含整数个 fractal ⇒ kernel 里不需要掩码，也不依赖 Mmad 对非对齐 k 的未文档化行为。
+<b>补零是精确的不是近似的</b>：补进去的 <code>q_a = 0</code>、<code>q_w = 0</code>，对 Mmad 贡献 0，对两个 rank-1 修正项也贡献 0
+（因为这两个和是在补齐后的范围上求的），<b>所以没有任何地方需要记录「真实元素数」</b>。
+QwQ-32B 在 TP=1..8 的全部八个行并行分片，<b>补齐量都是 0</b>——raggedness 全在组层级。</p>
+
+<h4>对齐形状零退化（比任何 TP 结果都更重要的一关）</h4>
+<p>改动把 <code>mm.k</code> / <code>ldA/ldB.repeatTimes</code> 从编译期常数变成运行期值。六个形状全在 lab 噪声地板 <b>±2.6%</b> 内
+（−0.5% / −1.4% / −1.0% / −2.1% / −0.1% / −0.4%）。<b>运行期化没有代价</b>，P0–P6 的全部数字仍然可比。
+精度也不动：<b>= P2 签核的那个配置（+0.05 dB）</b>。</p>
+
+<h4>行并行缩放效率 <code>eff = T(TP=1) / (TP × T(TP=k))</code>（0.5 = 零加速）</h4>
+<div class="tblwrap"><table>
+<thead><tr><th>proj</th><th class="num">M</th><th>eff@2 新 / 旧</th><th>eff@4 新 / 旧</th></tr></thead>
+<tbody>
+<tr><td>o</td><td class="num">16</td><td><b>0.633</b> / 0.517</td><td><b>0.357</b> / 0.270</td></tr>
+<tr><td>o</td><td class="num">512</td><td><b>0.734</b> / 0.514</td><td><b>0.474</b> / 0.259</td></tr>
+<tr><td>down</td><td class="num">16</td><td><b>0.764</b> / 0.509</td><td><b>0.539</b> / 0.251</td></tr>
+<tr><td>down</td><td class="num">512</td><td><b>0.911</b> / 0.531</td><td><b>0.733</b> / 0.265</td></tr>
+</tbody></table></div>
+<p><b>新路线在同形状上比旧路线快 1.23–2.78×，行并行第一次真的换到多卡加速</b>（eff@4 从 0.25 → 0.54）。
+<b>但引擎级 TP 仍不降延迟</b>（§6.4）——eff 0.54 离 1.0 还差一半，那一半就是 P7 的靶子。</p>
+
+<h3>4.8 P7 D2：收益域 —— <b>本项目最有解释力的一条结论</b></h3>
+<p>对 <code>p65_ragged_tp.csv</code> 的 o_proj 行（N=5120 固定，只扫 K ∈ {640,1280,2560,5120}），
+把耗时拟成 <code>固定开销 + K·斜率</code>：</p>
+<div class="tblwrap"><table>
+<thead><tr><th class="num">M</th><th class="num">W4A8 固定</th><th class="num">W4A8 斜率</th><th class="num">W8A8 固定</th><th class="num">W8A8 斜率</th><th class="num">斜率比</th><th class="num">固定差</th><th class="num">交叉点 K*</th></tr></thead>
+<tbody>
+<tr><td class="num">16</td><td class="num">15.4 µs</td><td class="num">2.24 µs/kK</td><td class="num">12.8 µs</td><td class="num">3.75 µs/kK</td><td class="num win"><b>0.60</b></td><td class="num">+2.5 µs</td><td class="num"><b>1665</b></td></tr>
+<tr><td class="num">128</td><td class="num">23.9 µs</td><td class="num">3.12</td><td class="num">13.0</td><td class="num">5.89</td><td class="num win"><b>0.53</b></td><td class="num">+10.8</td><td class="num"><b>3912</b></td></tr>
+<tr><td class="num">512</td><td class="num">36.2 µs</td><td class="num">13.90</td><td class="num">19.5</td><td class="num">13.85</td><td class="num lose"><b>1.00</b></td><td class="num">+16.8</td><td class="num lose">全输</td></tr>
+</tbody></table></div>
+
+<figure>
+<svg viewBox="0 0 620 330" width="100%" style="max-width:620px;background:#fff;border:1px solid #e3e7ee;border-radius:8px">
+<line x1="60" y1="280" x2="580" y2="280" stroke="#94a3b8" stroke-width="1"/>
+<line x1="60" y1="40" x2="60" y2="280" stroke="#94a3b8" stroke-width="1"/>
+<g font-size="11" fill="#5b6b81" font-family="ui-monospace,monospace">
+<text x="52" y="284" text-anchor="end">0</text>
+<text x="52" y="224" text-anchor="end">10</text>
+<text x="52" y="164" text-anchor="end">20</text>
+<text x="52" y="104" text-anchor="end">30</text>
+<text x="52" y="44"  text-anchor="end">40</text>
+<text x="20" y="30" fill="#1a2233" font-size="12">µs</text>
+<text x="60"  y="298" text-anchor="middle">0</text>
+<text x="167" y="298" text-anchor="middle">1280</text>
+<text x="273" y="298" text-anchor="middle">2560</text>
+<text x="487" y="298" text-anchor="middle">5120</text>
+<text x="320" y="318" text-anchor="middle" fill="#1a2233" font-size="12">K（每 rank 的收缩维）</text>
+</g>
+<line x1="60" y1="40" x2="60" y2="285" stroke="#e3e7ee"/>
+<line x1="167" y1="40" x2="167" y2="285" stroke="#e3e7ee" stroke-dasharray="3,3"/>
+<line x1="273" y1="40" x2="273" y2="285" stroke="#e3e7ee" stroke-dasharray="3,3"/>
+<line x1="487" y1="40" x2="487" y2="285" stroke="#e3e7ee" stroke-dasharray="3,3"/>
+<rect x="60" y="40" width="139" height="240" fill="#b31e30" opacity="0.06"/>
+<rect x="199" y="40" width="381" height="240" fill="#1a7f4b" opacity="0.06"/>
+<text x="128" y="58" text-anchor="middle" font-size="11" fill="#b31e30">K &lt; K*：W8A8 赢</text>
+<text x="390" y="58" text-anchor="middle" font-size="11" fill="#1a7f4b">K &gt; K*：W4A8-mg 赢（斜率比 0.60）</text>
+<polyline points="60,187.6 580,109.6" fill="none" stroke="#0f5ea8" stroke-width="2.5"/>
+<polyline points="60,203.2 580,72.6" fill="none" stroke="#b31e30" stroke-width="2.5"/>
+<circle cx="199" cy="165" r="4.5" fill="#1a2233"/>
+<line x1="199" y1="165" x2="199" y2="280" stroke="#1a2233" stroke-dasharray="4,3"/>
+<text x="207" y="152" font-size="12" font-weight="700" fill="#1a2233">K* = 1665</text>
+<circle cx="167" cy="169.5" r="4" fill="#b31e30"/>
+<text x="150" y="196" font-size="10.5" fill="#b31e30" text-anchor="end">o_proj@TP=4</text>
+<text x="150" y="209" font-size="10.5" fill="#b31e30" text-anchor="end">K=1280 → 1.066 输</text>
+<circle cx="273" cy="153" r="4" fill="#1a7f4b"/>
+<text x="283" y="196" font-size="10.5" fill="#1a7f4b">K=2560 → 0.935 赢</text>
+<circle cx="487" cy="118" r="4" fill="#1a7f4b"/>
+<text x="497" y="112" font-size="10.5" fill="#1a7f4b" text-anchor="end">o_proj@TP=1</text>
+<g font-size="12" font-weight="600">
+<rect x="380" y="238" width="12" height="3" fill="#0f5ea8"/><text x="398" y="243" fill="#0f5ea8">W4A8-mg  15.4 + 2.24·K/1000</text>
+<rect x="380" y="258" width="12" height="3" fill="#b31e30"/><text x="398" y="263" fill="#b31e30">W8A8     12.8 + 3.75·K/1000</text>
+</g>
+</svg>
+<figcaption><b>收益域图（M=16，o_proj，N=5120 固定）。</b>两条线的<b>斜率比是 0.60</b>（理论 0.5）——访存优势完好；
+两条线的<b>截距差 +2.5 µs</b> 才是问题。交叉点 <code>K* = 固定差 / 斜率差 = 1665</code>。
+TP=4 把 o_proj 切到 K=1280，正好落在红区里。数据：<code>p65_ragged_tp.csv</code>，4 点单次拟合。</figcaption>
+</figure>
+
+<p>三条结论：</p>
+<ol>
+<li><b>访存优势完好无损。</b>斜率比 M=16 是 0.60、M=128 是 0.53，理论值 0.5。
+「小 M 下 W4A8 的带宽优势很快消失」是<b>错觉</b>——消失的不是斜率。</li>
+<li><b>消失的是固定开销。</b>+2.5 / +10.8 / +16.8 µs，随 M 单调涨（= P5 的分组冲刷税）。
+K 越小它占比越大。实测对照（&lt;1 = 我们赢）：<code>o_proj@TP=4</code> K=1280 → <b>1.066 输</b>；
+K=2560 → 0.935 赢；<code>down_proj@TP=1</code> K=27648 → <b>0.615，赢 1.63×</b>。</li>
+<li><b>M=512 斜率比 = 1.00，访存优势结构性归零。</b>这不是实现问题，是算术：MSD 把 A 拆成两个 int4 平面 = <b>两遍 Mmad</b>，
+而 int4 cube 是 int8 的 <b>2×</b>，<code>2 遍 × 2× 速度 = 与一遍 int8 完全相等</code>。
+⇒ <b>compute-bound 区，W4A8-MSD 相对 W8A8 的计算优势恒为零</b>，再叠上固定开销必输。
+<b>这解释了 prefill 为什么无论怎么调都赢不了。</b></li>
+</ol>
+<div class="banner warn">⚠ <b>限定</b>：4 个点的单次拟合，重复性门禁尚未做。0.60 / 0.53 / 1.00 这个梯度远超 ±15% 噪声带，
+<b>方向可信</b>；<b>具体数值在门禁之前不得写进任何对外指标。</b></div>
+
+<h3>4.9 嫌疑人：CV（cube/vector）协作的结构性开销</h3>
+<pre class="code">AIC  (midgroup_w4a8_gemm.inc:550–892)   Mmad ─► Fixpipe(L0C ─► GM workspace) ─► SetFlag
+AIV  (                     :893–1168)   WaitFlag ─► 读 int32 partial ─► 每组 dequant + fp32 累加(UB) ─► SetFlag 归还 slot</pre>
+<p><b>每个量化组的部分和都要走一趟 <code>L0C → GM → UB</code>，外加两次 CrossCore 握手。</b>
+K=1280 时只有 2 个组，这趟往返摊不开；K=27648 有 27 个组，就摊开了。
+<b>这是 §4.8 那笔固定开销的最大嫌疑人，也是 P7 的施工面。</b>
+靶子：<b>把 M=16 的 K* 从 1665 压到 1280 以下</b>，<code>o_proj@TP=4</code> 即回到收益域。
+<b>只打固定项，不碰斜率</b>——斜率已经是理论值，那里没有空间。</p>
+</div>
+
+<div class="card">
+<h2 class="sec" id="s5">5 · 第二层：层级与引擎接入（P4）</h2>
+
+<h3>5.1 交付了什么</h3>
+<div class="tblwrap"><table>
+<thead><tr><th>项</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td>两个 kernel 包成 <code>torch.ops.npu.midgroup_{w4a8_gemm,quant_a}</code></td><td class="win">✅</td></tr>
+<tr><td>在<b>真 vLLM 引擎</b>里被 ACL 图捕获并 replay，四种投影全部接管，端到端能生成</td><td class="win">✅</td></tr>
+<tr><td>加载期转换器（BF16 → kernel 布局），64 个 linear 全部转换，0 跳过</td><td class="win">✅</td></tr>
+<tr><td>五路对照 × batch 1→256 八档扫描</td><td class="win">✅</td></tr>
+<tr><td>逐位回归（对改动前的 <code>.so</code>，含 ragged M）</td><td class="win">✅ 42/42</td></tr>
+<tr><td>真实校准 checkpoint（路线图第 1 步）</td><td class="lose">❌ 未做</td></tr>
+</tbody></table></div>
+
+<h3>5.2 两项改动，各自值多少（每层 µs，batch=1）</h3>
+<div class="tblwrap"><table>
+<thead><tr><th>改动</th><th class="num">每层 µs</th><th class="num">对 BF16</th></tr></thead>
+<tbody>
+<tr><td>接入引擎，原样（CKPT-B）</td><td class="num">882.1</td><td class="num">1.34×</td></tr>
+<tr><td>＋ 补齐搬进 <code>midgroup_quant_a</code>（CKPT-C）</td><td class="num">878.5</td><td class="num">1.41×</td></tr>
+<tr><td>＋ 图模式换 <code>FULL_DECODE_ONLY</code>（CKPT-D）</td><td class="num"><b>385.8</b></td><td class="num win"><b>2.82×</b></td></tr>
+</tbody></table></div>
+<ul>
+<li><b>补齐</b>：引擎 profiler 里 <b>PadV3 3840 次 / MemSet 3840 次 → 全部归零</b>，投影的每层设备时间
+<b>568 → 321 µs（−44%）</b>。但墙上时间几乎没动——<b>当时引擎是主机受限的</b>（设备利用率 36%）。</li>
+<li><b>图模式</b>：<code>Computing</code> 几乎不变（462.6 → 458.9 ms），<b><code>Free</code> 掉了 481 ms</b>（807.1 → 326.0）。
+空隙就是 PIECEWISE 的分段边界。</li>
+<li><b>两件事缺一不可</b>：只改补齐是 1.41×，只换图模式约 1.78×。</li>
+</ul>
+<div class="banner">这里修掉了一个<b>被调用方不变量藏了整整一期</b>的真 bug：<code>midgroup_quant_a.inc</code> 里
+零填充 <code>ubX</code>（V 管道）与装载 <code>ubX</code>（MTE2）之间只有 <code>PipeBarrier&lt;PIPE_V&gt;</code>——
+<b>PIPE_V 只排 V 对 V</b>，零填充会把刚装载的行冲掉。python 和 lab harness 都先把 M 补成 kBr 的倍数再进 kernel，
+<code>rows &lt; kBr</code> 那条分支<b>从来没执行过</b>；补齐搬进算子、M=1 的 ragged job 上了解码热路径，它当场现形——
+<b>恰好 (M mod 16) 行不对</b>，这是它的指纹。</div>
+
+<h3>5.3 交叉验证：两个独立口径给出同一个数</h3>
+<div class="tblwrap"><table>
+<thead><tr><th></th><th class="num">手搭图 <code>bench_decode_graph.py</code></th><th class="num">引擎 <code>bench_engine_decode.py</code></th></tr></thead>
+<tbody>
+<tr><td>我们 W4A8，batch=1</td><td class="num">376.6 µs/层</td><td class="num">385.8 µs/层</td></tr>
+<tr><td>vs 我们 W8A8</td><td class="num">1.33×</td><td class="num">1.32×</td></tr>
+</tbody></table></div>
+<p>PIECEWISE 下这两个口径差 2.3 倍、无法互证；FULL 模式下手搭那套数字可以当引擎的预测用了。</p>
+
+<h3>5.4 五路对照 × 八档 batch（每层斜率 µs，TP=1，<code>FULL_DECODE_ONLY</code>）</h3>
+<div class="tblwrap"><table>
+<thead><tr><th>arm</th><th class="num">1</th><th class="num">16</th><th class="num">32</th><th class="num">64</th><th class="num">96</th><th class="num">128</th><th class="num">192</th><th class="num">256</th></tr></thead>
+<tbody>
+<tr><td>原生 BF16</td><td class="num">1072</td><td class="num">1295</td><td class="num">1372</td><td class="num">1584</td><td class="num">1776</td><td class="num">1709</td><td class="num">2163</td><td class="num">2377</td></tr>
+<tr><td>原生 W8A8</td><td class="num">792</td><td class="num">970</td><td class="num">—</td><td class="num">1209</td><td class="num">—</td><td class="num">1223</td><td class="num">—</td><td class="num">—</td></tr>
+<tr><td>原生 W4A8</td><td class="num">441</td><td class="num">922</td><td class="num">1873</td><td class="num">1991</td><td class="num">1967</td><td class="num">2236</td><td class="num">2363</td><td class="num">2679</td></tr>
+<tr><td>我们 W8A8</td><td class="num">485</td><td class="num">595</td><td class="num">687</td><td class="num">830</td><td class="num">885</td><td class="num">933</td><td class="num">1240</td><td class="num">1496</td></tr>
+<tr><td><b>我们 W4A8</b></td><td class="num"><b>408</b></td><td class="num"><b>520</b></td><td class="num"><b>676</b></td><td class="num"><b>731</b></td><td class="num">1008</td><td class="num">986</td><td class="num">1699</td><td class="num">1816</td></tr>
+</tbody></table></div>
+<div class="tblwrap"><table>
+<thead><tr><th>我们的 W4A8 vs</th><th class="num">1</th><th class="num">16</th><th class="num">32</th><th class="num">64</th><th class="num">96</th><th class="num">128</th><th class="num">192</th><th class="num">256</th></tr></thead>
+<tbody>
+<tr><td>原生 W4A8</td><td class="num win">1.08×</td><td class="num win">1.77×</td><td class="num win"><b>2.77×</b></td><td class="num win">2.72×</td><td class="num win">1.95×</td><td class="num win">2.27×</td><td class="num win">1.39×</td><td class="num win">1.48×</td></tr>
+<tr><td>我们 W8A8</td><td class="num win">1.19×</td><td class="num win">1.15×</td><td class="num flat">1.02×</td><td class="num win">1.14×</td><td class="num lose">0.88×</td><td class="num lose">0.95×</td><td class="num lose">0.73×</td><td class="num lose">0.82×</td></tr>
+<tr><td>原生 BF16</td><td class="num win">2.63×</td><td class="num win">2.49×</td><td class="num win">2.03×</td><td class="num win">2.17×</td><td class="num win">1.76×</td><td class="num win">1.73×</td><td class="num win">1.27×</td><td class="num win">1.31×</td></tr>
+<tr><td><small>（原生 W4A8 vs BF16）</small></td><td class="num">2.43×</td><td class="num">1.40×</td><td class="num lose">0.73×</td><td class="num lose">0.80×</td><td class="num lose">0.90×</td><td class="num lose">0.76×</td><td class="num lose">0.92×</td><td class="num lose">0.89×</td></tr>
+</tbody></table></div>
+<p><small><b>口径限制</b>：曲线拼自两轮（1/16/64/128 一轮，32/96/192/256 另一轮），第二轮系统性偏高（最大 batch 不同 → 捕获的图和 KV 布局不同）。
+<b>同一列内跨 arm 的比值干净；跨列的绝对值和精确交叉点不干净。</b></small></p>
+
+<h3>5.5 为什么货架上的 W4A8 会在 batch≥32 崩掉</h3>
+<p>厂商路径是 <b>weight-only + group_size=128</b>：反量化成 bf16 再算，激活的 int8 从不进 cube。</p>
+<ul>
+<li><b>M=1 它几乎不吃亏</b>（2.43× BF16）——解码档是<b>带宽受限</b>的，weight-only 照样只从 HBM 读 int4，反量化在片上。
+它放弃的是<b>算力</b>收益，而 M=1 根本不缺算力。</li>
+<li><b>batch≥32 它崩掉</b>（0.73–0.92× BF16，<b>比 BF16 还慢</b>）——cube 成为瓶颈后它得按 bf16 算力算，还要多付反量化。</li>
+</ul>
+<p><b>g128 不是它的疏忽而是它的约束</b>：每 128 个元素就要冲刷一次 L0C 并施加组 scale，真 W4A8 的 cube 路径基本走不通。
+<b>这也正是我们把 GK 定到 1024 的原因。</b></p>
+
+<h3>5.6 P4 推翻的两个判断</h3>
+<ul>
+<li><b>「自定义 transformer 层 / 算子融合是下一步」——被一个参数取代。</b>原本的理由是压主机开销（每层 ~390 µs 空隙），
+<code>FULL_DECODE_ONLY</code> 一个参数把它压到 ~19 µs（385.8 wall vs 367 device）。<b>主机侧没有空间了</b>，
+算子融合只值 −21 µs/层。要重开必须给出新的、<b>设备侧</b>的理由。</li>
+<li><b>「补齐修掉后应到 1.5–1.8×」——错，实际 1.41×。</b>预测基于「设备时间省 249 µs/层」，
+但当时引擎是主机受限的（利用率 36%），省下的设备时间只变成了更多空闲。
+<b>拿设备时间推墙上时间，中间少了一步「设备是不是瓶颈」。</b>判据：<code>step_trace_time.csv</code> 的 <code>Computing</code> vs <code>Free</code>。</li>
+</ul>
+</div>
+
+<div class="card">
+<h2 class="sec" id="s6">6 · 第三层：端到端并行部署（真实 64 层 QwQ-32B）</h2>
+
+<h3>6.1 PP=4 —— <b>这是已交付的那条</b></h3>
+<h4>6.1.1 真实模型（PP=4 / 64 层）的每步耗时 µs（越小越好，prompt_len=128）</h4>
+<div class="tblwrap"><table>
+<thead><tr><th class="num">batch</th><th class="num">BF16</th><th class="num">native W8A8</th><th class="num">native W4A8</th><th class="num">我们 W8A8</th><th class="num">我们 W4A8</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td class="num">75445</td><td class="num">57291</td><td class="num">37636</td><td class="num">40088</td><td class="num win"><b>36235</b></td></tr>
+<tr><td class="num">16</td><td class="num">91826</td><td class="num">67266</td><td class="num">64168</td><td class="num">48658</td><td class="num win"><b>45797</b></td></tr>
+<tr><td class="num">64</td><td class="num">117572</td><td class="num">88862</td><td class="num">140035</td><td class="num">69992</td><td class="num win"><b>63629</b></td></tr>
+<tr><td class="num">128</td><td class="num">131555</td><td class="num">102788</td><td class="num">168875</td><td class="num win"><b>87202</b></td><td class="num">91878</td></tr>
+</tbody></table></div>
+
+<h4>6.1.2 对 BF16 的加速（同 PP 内比）</h4>
+<div class="tblwrap"><table>
+<thead><tr><th>arm</th><th>PP</th><th class="num">b=1</th><th class="num">b=16</th><th class="num">b=64</th><th class="num">b=128</th></tr></thead>
+<tbody>
+<tr><td>native W8A8</td><td>1 / 2 / 4</td><td class="num">1.30 / 1.30 / 1.32</td><td class="num">1.34 / 1.34 / 1.37</td><td class="num">1.28 / 1.30 / 1.32</td><td class="num">1.23 / 1.25 / 1.28</td></tr>
+<tr><td>native W4A8</td><td>1 / 2 / 4</td><td class="num">1.88 / 1.96 / 2.00</td><td class="num">1.38 / 1.38 / 1.43</td><td class="num lose">0.87 / 0.87 / 0.84</td><td class="num lose">0.83 / 0.82 / 0.78</td></tr>
+<tr><td>我们 W8A8</td><td>1 / 2 / 4</td><td class="num">1.75 / 1.81 / 1.88</td><td class="num">1.70 / 1.80 / 1.89</td><td class="num">1.52 / 1.57 / 1.68</td><td class="num">1.40 / 1.43 / 1.51</td></tr>
+<tr><td><b>我们 W4A8</b></td><td>1 / 2 / 4</td><td class="num win"><b>2.01 / 2.03 / 2.08</b></td><td class="num win"><b>1.93 / 1.94 / 2.01</b></td><td class="num win"><b>1.67 / 1.65 / 1.85</b></td><td class="num">1.34 / 1.35 / 1.43</td></tr>
+</tbody></table></div>
+<p><b>优势不随 PP 衰减</b>：2.01 → 2.03 → 2.08（batch=1）。考虑 ±15% 噪声带，<b>正确读法是「跨 PP 持平，没有衰减」</b>，
+而不是「随 PP 变强」——后者的幅度落在噪声里。对我们自己的 W8A8：<b>约 1.1×</b>（1.05–1.22 跨全部 PP 和 batch≤64）。</p>
+
+<h4>6.1.3 高并发（PP=4，16 层/卡）：加速随并发单调下滑</h4>
+<div class="bars">
+<div class="legend"><span><i style="background:#0f5ea8"></i>我们 W8A8 vs BF16</span><span><i style="background:#b31e30"></i>我们 W4A8 vs BF16</span><span><i style="background:#94a3b8;width:2px;height:12px"></i>1.0× 基准线</span></div>
+<div class="row"><span class="lab">b=1</span><span class="track"><span class="fill a" style="width:76.4%"></span><span class="one" style="left:33.3%"></span></span><span class="val">1.91</span></div>
+<div class="row"><span class="lab"></span><span class="track"><span class="fill c" style="width:89.2%"></span><span class="one" style="left:33.3%"></span></span><span class="val">2.23</span></div>
+<div class="row"><span class="lab">b=16</span><span class="track"><span class="fill a" style="width:74.4%"></span><span class="one" style="left:33.3%"></span></span><span class="val">1.86</span></div>
+<div class="row"><span class="lab"></span><span class="track"><span class="fill c" style="width:90.4%"></span><span class="one" style="left:33.3%"></span></span><span class="val">2.26</span></div>
+<div class="row"><span class="lab">b=64</span><span class="track"><span class="fill a" style="width:66.8%"></span><span class="one" style="left:33.3%"></span></span><span class="val">1.67</span></div>
+<div class="row"><span class="lab"></span><span class="track"><span class="fill c" style="width:77.6%"></span><span class="one" style="left:33.3%"></span></span><span class="val">1.94</span></div>
+<div class="row"><span class="lab">b=128</span><span class="track"><span class="fill a" style="width:61.2%"></span><span class="one" style="left:33.3%"></span></span><span class="val">1.53</span></div>
+<div class="row"><span class="lab"></span><span class="track"><span class="fill c" style="width:59.2%"></span><span class="one" style="left:33.3%"></span></span><span class="val">1.48</span></div>
+<div class="row"><span class="lab">b=256</span><span class="track"><span class="fill a" style="width:57.2%"></span><span class="one" style="left:33.3%"></span></span><span class="val">1.43</span></div>
+<div class="row"><span class="lab"></span><span class="track"><span class="fill c" style="width:49.2%"></span><span class="one" style="left:33.3%"></span></span><span class="val">1.23</span></div>
+</div>
+<p><b>两条线在 batch≈128 交叉</b>：W4A8 从领先 W8A8 变成落后。绝对吞吐 tok/s（PP=4）：
+BF16 13 / 182 / 560 / 988 / 1313；我们 W8A8 25 / 338 / 933 / <b>1509</b> / <b>1877</b>；
+我们 W4A8 <b>29 / 411 / 1086</b> / 1464 / 1619。</p>
+
+<h4>6.1.4 <b>PP 给的是容量，不是延迟</b></h4>
+<p>一个 token 仍要串行穿过全部 64 层，PP 只是把层摊到不同卡上，<b>再加上 rank 间传输</b>。
+真实模型 PP=4 的 batch=1 只有 <b>13 / 25 / 28 tok/s</b>（BF16 / 我们 W8A8 / 我们 W4A8）。
+<b>想用多卡换延迟只能靠 TP</b>——而 TP 正是目前过不去的关。</p>
+
+<h3>6.2 PP=4 长上下文与 prefill</h3>
+<h4>6.2.1 解码：我们的 W4A8 是<b>最抗上下文</b>的一条（batch=1，step_us）</h4>
+<div class="tblwrap"><table>
+<thead><tr><th>arm</th><th class="num">128</th><th class="num">1024</th><th class="num">4096</th><th class="num">8192</th><th class="num">128→8192 劣化</th></tr></thead>
+<tbody>
+<tr><td>BF16</td><td class="num">75316</td><td class="num">75442</td><td class="num">77829</td><td class="num">81470</td><td class="num">+8.2%</td></tr>
+<tr><td>native W8A8</td><td class="num">57585</td><td class="num">58027</td><td class="num">60214</td><td class="num">64175</td><td class="num">+11.4%</td></tr>
+<tr><td>native W4A8</td><td class="num">36706</td><td class="num">38756</td><td class="num">41449</td><td class="num">43628</td><td class="num lose">+18.9%</td></tr>
+<tr><td>我们 W8A8</td><td class="num">40362</td><td class="num">40923</td><td class="num">44176</td><td class="num">47201</td><td class="num">+17.0%</td></tr>
+<tr><td><b>我们 W4A8</b></td><td class="num win"><b>36227</b></td><td class="num win"><b>36320</b></td><td class="num win"><b>37664</b></td><td class="num win"><b>39689</b></td><td class="num win"><b>+9.6%</b></td></tr>
+</tbody></table></div>
+<p>对 BF16 的解码加速<b>跨上下文几乎不动</b>：2.08 / 2.08 / 2.07 / <b>2.05</b>（我们 W8A8 是 1.87→1.73）。
+对我们自己的 W8A8 反而<b>随上下文变强</b>：1.11 → 1.13 → 1.17 → <b>1.19</b>。
+batch=8 时稀释才显现（注意力量 ∝ batch × 上下文）：对 BF16 从 2.12 降到 <b>1.64</b>，但对我们 W8A8 仍稳在 1.14–1.17。</p>
+
+<h4>6.2.2 Prefill：<b>我们输，而且是一致地输</b>（ms，全新 prompt，<code>max_tokens=1</code>）</h4>
+<div class="tblwrap"><table>
+<thead><tr><th class="num">batch</th><th>arm</th><th class="num">128</th><th class="num">1024</th><th class="num">4096</th><th class="num">8192</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td>BF16</td><td class="num">156</td><td class="num">425</td><td class="num">1481</td><td class="num">3073</td></tr>
+<tr><td class="num">1</td><td>我们 W8A8</td><td class="num">170</td><td class="num win"><b>237</b></td><td class="num win"><b>859</b></td><td class="num win"><b>1932</b></td></tr>
+<tr><td class="num">1</td><td>我们 W4A8</td><td class="num">171</td><td class="num">355</td><td class="num">1307</td><td class="num">2815</td></tr>
+<tr><td class="num">8</td><td>BF16</td><td class="num">389</td><td class="num">2754</td><td class="num">5192</td><td class="num">8781</td></tr>
+<tr><td class="num">8</td><td>我们 W8A8</td><td class="num">241</td><td class="num win"><b>1622</b></td><td class="num win"><b>3176</b></td><td class="num win"><b>5595</b></td></tr>
+<tr><td class="num">8</td><td>我们 W4A8</td><td class="num">349</td><td class="num">2529</td><td class="num">4768</td><td class="num">8070</td></tr>
+</tbody></table></div>
+<div class="banner"><b>我们 W4A8 ÷ 我们 W8A8：八个点全部在 0.64–0.69</b>，远超噪声带，方向完全一致。
+对 BF16，我们的 W4A8 prefill 只有 1.09–1.20×，而我们的 W8A8 有 1.57–1.80×。
+<b>这就是 P5 那条「大 M 结构性冲刷税」第一次在真实引擎的 prefill 上被端到端测到</b>，
+kernel 级早在 P3 §4.2 就预告了（qkv/o 在 M=1024 是 0.76×/0.79×），机理在 P7 D2 §4.8 第 3 条（斜率比 = 1.00）。<br/>
+<small>plen=128 那一列（156–171 ms）被固定开销主导，五条 arm 基本一样，<b>不要读</b>。</small></div>
+
+<h3>6.3 交叉点：<b>batch=256</b> 我们的 W4A8 输给我们的 W8A8</h3>
+<div class="tblwrap"><table>
+<thead><tr><th class="num">PP</th><th class="num">b=1</th><th class="num">b=16</th><th class="num">b=64</th><th class="num">b=128</th><th class="num">b=256</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td class="num win">1.17</td><td class="num win">1.17</td><td class="num win">1.13</td><td class="num flat">0.98</td><td class="num lose"><b>0.91</b></td></tr>
+<tr><td class="num">2</td><td class="num win">1.13</td><td class="num win">1.16</td><td class="num win">1.12</td><td class="num flat">0.97</td><td class="num lose"><b>0.90</b></td></tr>
+<tr><td class="num">4</td><td class="num win">1.16</td><td class="num win">1.22</td><td class="num win">1.16</td><td class="num flat">0.97</td><td class="num lose"><b>0.86</b></td></tr>
+</tbody></table></div>
+<p><b>batch=128 那一列（0.97–0.98）落在噪声带内，不能当「输」</b>——另一轮 sweep 在同样位置读到 0.94–0.95。
+<b>站得住的交叉点是 batch=256</b>：0.86–0.91，三个 PP 上方向一致，幅度 9–14% 超出带宽。
+P4 曾把交叉点报在 batch≥96，<b>本项目按更严的噪声口径把它修正到 batch≈256</b>。</p>
+
+<h3>6.4 TP=4 —— <b>这是塌掉的那条</b></h3>
+<div class="banner warn"><b>HCCL all-reduce 是一笔 arm-无关的税</b>（3632 µs/step，<code>Overlapped=0</code>）。
+所以这张表上的每个比值相对 TP=1 的同一比值都是<b>被稀释</b>的（TP=1 是 2.28× vs bf16）。
+<b>这是 TP 的性质，不是测量误差。</b></div>
+
+<h4>6.4.1 并发轴 —— 解码每步 µs（plen=1024, out=256）</h4>
+<div class="tblwrap"><table>
+<thead><tr><th class="num">batch</th><th class="num">bf16</th><th class="num">w8a8</th><th class="num">w4a8</th><th class="num">w8a8-native</th><th class="num">w4a8-native</th><th class="num">w4a8 vs bf16</th><th class="num">w4a8 vs w8a8</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td class="num">31142.8</td><td class="num">27874.4</td><td class="num"><b>26846.7</b></td><td class="num">28838.2</td><td class="num">26987.8</td><td class="num win">1.16×</td><td class="num flat">~1.04×</td></tr>
+<tr><td class="num">16</td><td class="num">38590.7</td><td class="num">36535.6</td><td class="num"><b>34412.3</b></td><td class="num">36576.4</td><td class="num">39956.4</td><td class="num win">1.12×</td><td class="num">1.06×</td></tr>
+<tr><td class="num">64</td><td class="num">62318.5</td><td class="num">60694.7</td><td class="num">59643.6</td><td class="num">58811.8</td><td class="num">77229.0</td><td class="num flat">~1.04×</td><td class="num flat">~1.02×</td></tr>
+<tr><td class="num">128</td><td class="num">89976.5</td><td class="num">88202.4</td><td class="num">91219.2</td><td class="num">85552.8</td><td class="num">108002.8</td><td class="num flat">~0.99×</td><td class="num flat">~0.97×</td></tr>
+<tr><td class="num">256</td><td class="num">153843.3</td><td class="num">149717.1</td><td class="num">153984.2</td><td class="num">146125.0</td><td class="num">164164.1</td><td class="num flat">~1.00×</td><td class="num flat">~0.97×</td></tr>
+</tbody></table></div>
+<p><small><code>~</code> = 落在 ±5% 噪声地板内，<b>不是一个结论</b>。吞吐口径同形：37.2 / 464.9 / 1073.0 / 1403.2 / 1662.5 tok/s（我们 W4A8）。</small></p>
+
+<h4>6.4.2 TP=4 vs PP=4 的正面对照（我们 W4A8 vs BF16）</h4>
+<div class="bars">
+<div class="legend"><span><i style="background:#1a7f4b"></i>PP=4（L=64，plen=128）</span><span><i style="background:#b31e30"></i>TP=4（L=64，plen=1024）</span><span><i style="background:#94a3b8;width:2px;height:12px"></i>1.0× 基准线</span></div>
+<div class="row"><span class="lab">b=1</span><span class="track"><span class="fill" style="width:83.2%;background:#1a7f4b"></span><span class="one" style="left:40%"></span></span><span class="val">2.08</span></div>
+<div class="row"><span class="lab"></span><span class="track"><span class="fill c" style="width:46.4%"></span><span class="one" style="left:40%"></span></span><span class="val">1.16</span></div>
+<div class="row"><span class="lab">b=16</span><span class="track"><span class="fill" style="width:80.4%;background:#1a7f4b"></span><span class="one" style="left:40%"></span></span><span class="val">2.01</span></div>
+<div class="row"><span class="lab"></span><span class="track"><span class="fill c" style="width:44.8%"></span><span class="one" style="left:40%"></span></span><span class="val">1.12</span></div>
+<div class="row"><span class="lab">b=64</span><span class="track"><span class="fill" style="width:74.0%;background:#1a7f4b"></span><span class="one" style="left:40%"></span></span><span class="val">1.85</span></div>
+<div class="row"><span class="lab"></span><span class="track"><span class="fill c" style="width:41.6%"></span><span class="one" style="left:40%"></span></span><span class="val">1.04</span></div>
+<div class="row"><span class="lab">b=128</span><span class="track"><span class="fill" style="width:57.2%;background:#1a7f4b"></span><span class="one" style="left:40%"></span></span><span class="val">1.43</span></div>
+<div class="row"><span class="lab"></span><span class="track"><span class="fill c" style="width:39.6%"></span><span class="one" style="left:40%"></span></span><span class="val">0.99</span></div>
+</div>
+<p><small>⚠ 两组的 plen 不同（PP 轮 128、TP 轮 1024），<b>不能当同一次实验的严格对照</b>；但 2.08 vs 1.16 的量级差远超任何口径差与 ±15% 噪声带。</small></p>
+
+<h4>6.4.3 长上下文（TP=4）：<b>比值是平的，而这本身就是指纹</b></h4>
+<div class="tblwrap"><table>
+<thead><tr><th class="num">prompt_len</th><th class="num">bf16</th><th class="num">w8a8</th><th class="num">w4a8</th><th class="num">w4a8 vs bf16</th><th class="num">w4a8 vs w8a8</th></tr></thead>
+<tbody>
+<tr><td class="num">128</td><td class="num">33474.7</td><td class="num">29017.1</td><td class="num">28078.5</td><td class="num">1.19×</td><td class="num flat">~1.03×</td></tr>
+<tr><td class="num">1024</td><td class="num">33282.1</td><td class="num">32335.1</td><td class="num">28584.9</td><td class="num">1.16×</td><td class="num">1.13×</td></tr>
+<tr><td class="num">4096</td><td class="num">34874.1</td><td class="num">33164.1</td><td class="num">30778.7</td><td class="num">1.13×</td><td class="num">1.08×</td></tr>
+<tr><td class="num">8192</td><td class="num">37954.1</td><td class="num">35304.9</td><td class="num">33850.8</td><td class="num">1.12×</td><td class="num flat">~1.04×</td></tr>
+</tbody></table></div>
+<p><small>batch=1, out=64。batch=8 同轴：1.14 / 1.16 / 1.17 / 1.12（vs bf16），同样平。</small></p>
+<div class="banner info"><b>「比值对所有变量都不敏感」不是好消息，它是一笔 arm-无关固定开销在支配每步的指纹。</b>
+在 PP 上，比值会随 batch 和上下文<b>明显移动</b>（2.23 → 1.23，2.08 → 2.05）——因为那里 GEMM 真的在分母里占大头。
+TP=4 上它<b>不动</b>，说明每步被别的东西吃掉了。</div>
+
+<h4>6.4.4 TP=4 的账已经逐项对上了（L=16 口径，profiler）</h4>
+<div class="tblwrap"><table>
+<thead><tr><th>TP</th><th class="num">Computing</th><th class="num">Communication (Not Overlapped)</th><th class="num">Overlapped</th><th class="num">Free</th><th class="num">合计 µs/step</th></tr></thead>
+<tbody>
+<tr><td>1</td><td class="num">6751</td><td class="num">0</td><td class="num">—</td><td class="num">5302</td><td class="num">12053</td></tr>
+<tr><td><b>4</b></td><td class="num win"><b>3275</b></td><td class="num lose"><b>3632</b></td><td class="num lose"><b>0</b></td><td class="num">5976</td><td class="num">12882</td></tr>
+</tbody></table></div>
+<p><b>净账：省 3476 − 加 3632 − Free 涨 674 = +829 µs，与实测 step 增量 12053 → 12882 完全相等。</b>两条读法：</p>
+<ol>
+<li><b>TP 的失败不在 kernel。</b><code>Computing</code> 精确减半，我们的算子在 TP 下确实缩放了。</li>
+<li><b><code>Overlapped = 0</code></b>——collective 一微秒都没和计算重叠，3632 µs 全在关键路径上。
+天花板：消掉它 ⇒ TP=4 的 step 12882 → 9251 µs = <b>1.30×</b>。</li>
+</ol>
+<div class="banner warn"><b>§6.4.4 与 §4.8 不矛盾，是两件不同的事。</b>
+§6.4.4 说的是「<i>W4A8 自己</i> 的 TP 扩展有效」（Computing 减半）；
+§4.8 说的是「<i>W4A8 相对 W8A8 的优势</i> 在 K &lt; K* 时消失」。两者都成立，且 <b>1.16× 的成因至今未定量拆分</b>
+——通信税 vs 算子低维度效率，两者指向完全相反的后续（P8 vs P7），探针
+<code>scripts/profile_p65_tp_split.sh</code> 已备好但未跑。</div>
+
+<h4>6.4.5 TP=4 的 prefill：打平（推翻了 PP 上的 0.64–0.69×）</h4>
+<p>TP=4 prefill 五档 batch 全部是 <b>~0.97× vs BF16 / 0.90× vs 我们的 W8A8</b>，长上下文轴 0.88–1.02×。
+<b>这与 PP 上一致地输 0.64–0.69× 直接冲突。</b>推测是 chunked prefill 截断了有效 M（⇒ 每个 chunk 的 M 落回收益域），
+<b>但未验证，当前是推测不是结论</b>，已列入欠账。</p>
+
+<h4>6.4.6 <code>async_scheduling</code>：一个免费的开关，但在 L=64 缩水</h4>
+<div class="tblwrap"><table>
+<thead><tr><th>arm</th><th class="num">b=1</th><th class="num">b=16</th><th class="num">b=64</th><th class="num">b=128</th><th class="num">b=256</th></tr></thead>
+<tbody>
+<tr><td>bf16 (OFF→ON)</td><td class="num">1.10×</td><td class="num">1.10×</td><td class="num">1.09×</td><td class="num">1.09×</td><td class="num">1.09×</td></tr>
+<tr><td>w4a8 (OFF→ON)</td><td class="num">1.10×</td><td class="num">1.10×</td><td class="num">1.09×</td><td class="num">1.09×</td><td class="num">1.10×</td></tr>
+</tbody></table></div>
+<p><code>vllm-ascend</code> <b>默认关</b>。在 L=16 它值 1.23–1.29×（那里设备空闲占 44%）；L=64 空闲降到 ~17%，它只值 <b>1.09–1.10×</b>。
+<b>且对 BF16 和 W4A8 收益相同</b>——这证实了「它值多少」的量级，同时<b>证伪</b>了此前「它偏向量化路径」的说法。
+限制：<b>不支持 PP</b>，所以 §6.1 那条已交付路径用不上它。</p>
+</div>
+
+<div class="card">
+<h2 class="sec" id="s7">7 · 内存：唯一一条<b>不随工作点换位</b>的收益</h2>
+<p>前面每一个延迟结论都必须带 batch 档，因为三条路的排序在 M 上会换位。<b>内存收益是常数</b>，
+而且它是<b>能力差异</b>而非速度差异——它决定「装不装得下」，不只是「跑得快不快」。</p>
+
+<h3>7.1 权重占用（按模型几何精确计算，并与磁盘实测交叉验证）</h3>
+<div class="tblwrap"><table>
+<thead><tr><th>配置</th><th class="num">计算值</th><th class="num">磁盘实测</th><th class="num">vs BF16</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>BF16</td><td class="num">65.5 GB</td><td class="num"><b>62 G</b></td><td class="num">1.00×</td><td>32.76 B 参数（linear 31.21 B + emb/head 1.56 B，untied）</td></tr>
+<tr><td>厂商 W8A8</td><td class="num">43.4 GB</td><td class="num"><b>41 G</b></td><td class="num">1.5×</td><td class="lose">64 个 down_proj 留 <code>FLOAT</code>（占 29% 参数）</td></tr>
+<tr><td>我们 W8A8（int8 ×4）</td><td class="num">34.3 GB</td><td class="num">—</td><td class="num">1.9×</td><td>四种投影全量化</td></tr>
+<tr style="background:#eefaf3"><td><b>我们 W4A8-mg（int4 ×4）</b></td><td class="num win"><b>19.0 GB</b></td><td class="num win"><b>19 G</b></td><td class="num win"><b>3.5×</b></td><td>含 mid-group 辅助张量 0.24 GB</td></tr>
+</tbody></table></div>
+<div class="banner ok"><b>两条交叉验证</b>：① 计算值与磁盘实测逐条对上（19.0 ↔ 19 G，65.5 ↔ 62 G）；
+② <b>厂商 W8A8 是 41 G 而不是 34 G，这本身就是「down_proj 留 FLOAT」的独立物证</b>——
+它与 §2.2 里通过 <code>apply_model</code> 查到的 <code>quant_method</code> 类名互相印证，两条独立证据指向同一个事实。</div>
+
+<h3>7.2 mid-group 的元数据开销可以忽略</h3>
+<p>mid-group 相对 per-channel 多出三个 <code>[N, K/GK]</code> 的张量：<code>ws</code>（bf16）、<code>wz</code>（bf16）、
+<code>w_ksum</code>（int32）。每层合计 <b>476,160 个元素 × 8 B = 3.81 MB</b>，全模型 <b>0.24 GB</b>：</p>
+<div class="tblwrap"><table>
+<thead><tr><th>项</th><th class="num">每层</th><th class="num">全模型</th><th class="num">占 W4A8 权重</th></tr></thead>
+<tbody>
+<tr><td>int4 权重本体</td><td class="num">243.8 MB</td><td class="num">15.61 GB</td><td class="num">82.2%</td></tr>
+<tr><td>mid-group 辅助（ws / wz / w_ksum）</td><td class="num">3.81 MB</td><td class="num">0.24 GB</td><td class="num flat"><b>1.3%</b></td></tr>
+<tr><td>embedding + lm_head（留 BF16）</td><td class="num">—</td><td class="num">3.11 GB</td><td class="num">16.4%</td></tr>
+</tbody></table></div>
+<p><b>结论：分组量化在内存上是免费的。</b>GK 从 1024 缩到 256 会让辅助张量涨 4 倍（0.24 → 0.96 GB），
+仍只占 5%——<b>所以 GK 的选择完全由性能和精度决定，内存不参与这个权衡。</b></p>
+
+<h3>7.3 单卡 KV 容量：这才是内存收益的兑现方式</h3>
+<p>910B4 实测 <b>65536 MB = 64 GB HBM/卡</b>（<code>npu-smi</code>），空载框架占用约 3.4 GB。
+QwQ-32B 是 GQA（40 query 头 / 8 KV 头 / head_dim 128），KV cache 为
+<code>2 × 8 × 128 × 2 B × 64 层 = 262144 B = <b>256 KiB/token</b></code>：</p>
+<div class="tblwrap"><table>
+<thead><tr><th>配置</th><th class="num">权重</th><th class="num">可用于 KV</th><th class="num">单卡 KV tokens</th><th class="num">vs 我们 W8A8</th></tr></thead>
+<tbody>
+<tr><td>BF16</td><td class="num">65.5 GB</td><td class="num lose">—</td><td class="num lose"><b>装不下</b></td><td class="num">—</td></tr>
+<tr><td>厂商 W8A8</td><td class="num">43.4 GB</td><td class="num">17.2 GB</td><td class="num">66 K</td><td class="num">0.66×</td></tr>
+<tr><td>我们 W8A8</td><td class="num">34.3 GB</td><td class="num">26.3 GB</td><td class="num">100 K</td><td class="num">1.00×</td></tr>
+<tr style="background:#eefaf3"><td><b>我们 W4A8-mg</b></td><td class="num win"><b>19.0 GB</b></td><td class="num win"><b>41.6 GB</b></td><td class="num win"><b>159 K</b></td><td class="num win"><b>1.6×</b></td></tr>
+</tbody></table></div>
+<div class="banner ok"><b>最硬的一条：BF16 的 QwQ-32B 在 64 GB 单卡上根本装不下</b>（65.5 &gt; 64），
+而 W4A8 装下之后还剩 41.6 GB。<b>这不是「快多少倍」的问题，是「能不能跑」的问题</b>——
+在多卡方案里，它兑现成省下的卡数（PP=4 每 rank：BF16 16.4 GB → 我们 W8A8 8.6 GB → <b>我们 W4A8 4.7 GB</b>）。</div>
+
+<h3>7.4 但内存收益与延迟收益<b>不指向同一个工作点</b></h3>
+<div class="banner warn">KV 容量直接换算成<b>并发 × 上下文</b>的上限。可是 §6.3 实测：
+<b>batch ≥ 256 时我们的 W4A8 输给我们的 W8A8（0.86–0.91×）</b>。
+⇒ <b>「能装下更多」和「跑得更快」在这个方案里是两个相反的方向。</b><br/><br/>
+<b>正确的用法是用多出来的 KV 空间换更长的上下文</b>——那里我们最强（8K 仍 2.05× BF16，
+且是五条 arm 里劣化最小的 +9.6%），<b>而不是换更大的 batch</b>——那里我们输。
+两种用法消耗的是同一份 KV 空间，收益方向却相反，<b>部署时必须显式选一个</b>。</div>
+
+<h3>7.5 本节的限定</h3>
+<ul>
+<li>权重占用是<b>按模型几何精确计算</b>并与磁盘实测交叉验证的，可信。</li>
+<li><b>KV 容量是推算值</b>：未实测特定 <code>gpu_memory_utilization</code> 下 vLLM 真实分配的 KV 块数，
+也未计入激活峰值与图捕获的显存。<b>方向可信，绝对值需实测</b>，已列入 §12 欠账。</li>
+<li>KV cache 本身<b>没有被量化</b>——本项目只动 Linear 的 W 和 A。KV 量化是一条独立的、
+与本方案正交的收益线，未做。</li>
+</ul>
+</div>
+
+<div class="card">
+<h2 class="sec" id="s8">8 · 精度：P2 门禁的真实状态</h2>
+<div class="banner"><b>P2 是一个被挂起的 go/no-go，不是通过。</b>路线图原本把它定为硬门禁「P2 不过就不做 P3」；
+2026-08-13 用户决定 P2/P3 并行，理由是 P0 的探针已经把完整 mid-group 流水写完，
+<b>P3 的边际成本远低于路线图写作时的估计</b>，前提不再成立。<b>但 P2 的结论没有改变。</b></div>
+
+<h3>8.1 PPL（完整 WikiText-2 test split，150 窗口 / 307k token，相对 W8A8）</h3>
+<div class="tblwrap"><table>
+<thead><tr><th>配置</th><th class="num">ΔPPL（kernel 模式）</th><th class="num">ΔPPL（dequant 模式）</th><th>判定</th></tr></thead>
+<tbody>
+<tr><td><code>w8a8-mg1024</code></td><td class="num win">−0.098%</td><td class="num win">−0.150%</td><td>比 per-token W8A8 还略好 ⇒ <b>真正的回退点</b></td></tr>
+<tr><td><code>w4a8-mg1024</code>（对称）</td><td class="num lose">+9.028%</td><td class="num lose">+9.094%</td><td>出局</td></tr>
+<tr><td><b><code>w4a8-mg1024-asym</code></b></td><td class="num win"><b>+3.560%</b></td><td class="num win"><b>+3.523%</b></td><td><b>过 ≤5% 门禁</b>（门槛 2026-08-11 由 ≤2% 明示放宽到 ≤5%）</td></tr>
+<tr><td><code>w4a8-pc</code></td><td class="num lose">+33.85%</td><td class="num lose">+33.68%</td><td>出局，<b>不是可用的回退点</b></td></tr>
+</tbody></table></div>
+
+<h3>8.2 三条改变了方法学的发现</h3>
+<ul>
+<li><b>GK 不是杠杆，AWQ 也不是。</b>GK 从 1024 缩到 128（组数 8 倍，按 P0 的代价表根本买不起）只赚回约 1/3 的缺口；
+AWQ 式逐通道缩放两个方向都只值 0.3–0.5 dB。归因：<b>mid-group 对激活值钱（down_proj +8.5 dB），对 int4 权重几乎无效</b>
+（per-channel 13.8 dB → GK=128 只到 18.3 dB）。<b>真正的杠杆是非对称权重</b>：一次拿回 5.5 个百分点，
+而 kernel 只多一个每组的激活行和（§3.3，且实测几乎免费）。
+<small>另：<code>GK=512</code> 非对称的反常（+6.04%，比 1024 的 +3.56% 还差）是真的，已复现。</small></li>
+<li><b>SNR 三层判据（32/35/35 dB）在现成 QwQ-32B 上作废</b>——连 <code>w8a8</code> 自己都过不了（T2 最差 9.40 dB），
+可它 PPL 无损。门禁改用 PPL / 任务评测、以 W8A8 为参照系；Tier1/2 保留为定位问题层的诊断工具。</li>
+<li><b>门禁数字必须在完整 test split 上取</b>：8 窗口的子集<b>系统性高估退化近一倍</b>（+18.67% vs +9.03%），
+因为开头那段文本明显更容易。<b>这是偏差不是方差</b>，加重复次数救不了。</li>
+</ul>
+
+<h3>8.3 GPTQ：做完了，没有增益</h3>
+<p>逐列量化 + 逆 Hessian 误差补偿，128 窗口顺序标定（每层用已量化的前序层产出的激活）。
+标定集上层输出 SNR <b>+1.3 ~ +6.1 dB</b>，但完整 split 的端到端 PPL：
+<b>asym-GPTQ +4.98% 反而差于 RTN 的 +3.52%</b>，测试集逐层 SNR 增益 ≈0（+0.03 dB）。<b>用户决定暂缓 GPTQ。</b></p>
+<div class="banner warn">⚠ 冒烟时（4 窗口）看到 +10~20 dB 是<b>假的</b>——8192 token 对 <code>down_proj</code> 的 K=27648 是<b>秩亏 Hessian</b>，
+那是样本内过拟合。必须用 ≥128 窗口。</div>
+
+<h3>8.4 <b>任务评测：这才是没过的那一项</b></h3>
+<div class="tblwrap"><table>
+<thead><tr><th>对照</th><th class="num">GLUE 8 任务平均（主指标）</th><th>最差项</th></tr></thead>
+<tbody>
+<tr><td>w8a8 vs bf16</td><td class="num win">−0.1 个百分点（无损）</td><td>—</td></tr>
+<tr><td><b>asym vs w8a8</b></td><td class="num lose"><b>−4.5 个百分点</b></td><td class="lose">cola mcc <b>−11.7</b> / qqp acc <b>−13.0</b>（崩盘），其余 −0.3~−5</td></tr>
+</tbody></table></div>
+<p><small>limit 500/任务，0-shot。</small></p>
+<p><b>路线图 §6 原文写明「若三项指标冲突（PPL 过、任务不过），以任务评测为准」</b>，原定门槛是相对 W8A8 绝对分下降 ≤1 个百分点。
+<b>QwQ-32B 是推理模型，输出长、对累积误差敏感，PPL 只测单步 next-token，测不出误差沿几千 token 推理链的累积。</b></p>
+<p><b>P2 剩余待办</b>：定任务验收门槛（用户拍板）→ GSM8K（生成，对推理模型最有信息量，<b>必须开 batch</b>：未批处理只有 4.2 token/s，
+200 题 × 1024 token 要 13 小时）→ 一项中文（C-Eval / CMMLU）→ 冻结验收标准。</p>
+</div>
+
+<div class="card">
+<h2 class="sec" id="s9">9 · 通信 kernel：一份已定价、未接入的资产（P8）</h2>
+<p>为了攻 §6.4.4 那 3632 µs，写了一个自研 all-reduce：<b>peer HBM 直读 + ACL IPC 映射，零 HCCL</b>，
+barrier 在 kernel 内（所以能进捕获图），多核靠跨 rank 对称切分 ⇒ rank 内零同步，
+<b>bf16 原生</b>（= GEMM 的输出格式，累加仍在 f32）。</p>
+<div class="tblwrap"><table>
+<thead><tr><th>规模</th><th class="num">我们（图内）</th><th class="num">我们（eager）</th><th class="num">HCCL</th><th class="num">加速</th></tr></thead>
+<tbody>
+<tr><td>10 KB（M=1，解码档）</td><td class="num win"><b>16.9 µs</b></td><td class="num">18.9</td><td class="num">242–268</td><td class="num win"><b>15×</b>（TP=2 是 22×）</td></tr>
+<tr><td>M=64</td><td class="num flat">—</td><td class="num">—</td><td class="num">—</td><td class="num flat">0.91×（打平）</td></tr>
+</tbody></table></div>
+<p><b>M=64 打平是算法性的，不是实现问题</b>：跨卡流量是 ring 的 2 倍，交叉点随 world size 走。
+门禁：6 项 × 2 dtype × TP=2/4 全过，含 skew、200 次无 host barrier、<b>24 张图同时存活</b>、NPUGraph 捕获重放正确。</p>
+<p><b>融合也定价了</b>：drop-in 替换能拿走那 3632 µs 里的 <b>~86%</b>，而<b>真融合（GEMM epilogue 内归约）只多 ~8%</b>
+⇒ 下一步是接进 vLLM 量引擎，<b>不是</b>动 63 KB 的 GEMM kernel。</p>
+<div class="banner warn"><b>但它被判定为外延，停在「已定价」。</b>理由（P6.5 D19）：同一个 TP 下三个 arm 付的是<b>同一笔</b>通信，
+所以消掉它改变的是 TP 的绝对延迟，<b>不改变交付要的三方相对关系</b>。<br/>
+<b>开工前必须先跑 P7 第 1 项</b>（profile split）：若通信占大头 ⇒ P8 提上来；若只占一小部分 ⇒ <b>P8 不值得开</b>，问题在 P7。
+⚠ <b>L=64 的通信量从未实测</b>，那个「按层数外推约 14 ms」是推测。</div>
+
+<h3>9.1 这条支线上踩到的、值得单独记住的坑</h3>
+<ul>
+<li><b>没有跨设备 UVA</b>：各 rank 的 <code>data_ptr</code> 数值相同，裸指针会<b>静默读本地内存</b>。必须 <code>aclrtIpcMem*</code> 并断言地址不同。</li>
+<li><b>AscendC 运行期下标的指针数组只读到 element 0</b>，无警告 ⇒ 必须展开。它伪装成「这个特性不支持」，而且「一次一个指针」仍然能过。</li>
+<li><b>NPUGraph 的输入张量必须保活</b>：重放读的是冻结地址；丢掉输入会静默减少被回收的内存，模仿出「图 vs 图」的假腐败。</li>
+<li><b>MC2（厂商融合算子）单跑绿、进 vLLM 必死</b>（两种图模式都挂），<code>ret=4</code> 是一次性首调用失败（重试即可）——但它<b>不能拿来定价</b>。</li>
+<li><b>多 rank 探针出问题时先怀疑自己的同步</b>：一天里三次「平台故障」全是自己缺/多了 barrier；<b>你为观察 bug 而加的同步本身会制造 bug</b>。</li>
+<li><b>被 kill 的 vLLM worker 会毒掉 HCCL</b>：孤儿 <code>VLLM::Worker_TPn</code> 占着卡，之后所有 run 死在 <code>hcclCommInitRootInfoConfig error 7</code>。</li>
+</ul>
+</div>
+
+<div class="card">
+<h2 class="sec" id="s10">10 · 部署建议</h2>
+<div class="tblwrap"><table>
+<thead><tr><th>场景</th><th>选哪条</th><th>依据</th></tr></thead>
+<tbody>
+<tr><td>解码为主、低到中并发（batch ≤ 64），<b>PP</b> 部署</td><td class="win"><b>我们的 W4A8</b></td><td>2.0–2.2× BF16，约 1.1× 我们的 W8A8（§6.1）</td></tr>
+<tr><td>长上下文解码（8K），<b>PP</b> 部署</td><td class="win"><b>我们的 W4A8</b></td><td>2.05× BF16，五条里劣化最小（+9.6%）（§6.2.1）</td></tr>
+<tr><td>高并发（batch ≥ 256）</td><td>我们的 W8A8</td><td>W4A8 掉到 0.86–0.91×（§6.3）</td></tr>
+<tr><td>prefill 为主 / 长 prompt（PP）</td><td>我们的 W8A8</td><td>W4A8 只有 W8A8 的 0.64–0.69×（§6.2.2）</td></tr>
+<tr><td>需要用多卡降<b>延迟</b>（TP）</td><td class="flat">目前无差别</td><td>TP=4 打平（§6.4）；机理见 §4.8</td></tr>
+<tr><td>任何对输出质量有要求的场景</td><td class="lose">先补 §8 与权重导出器</td><td>P2 门禁未过 + 随机权重</td></tr>
+</tbody></table></div>
+<div class="banner ok"><b>最自然的结论是 prefill / decode 分离部署</b>：prefill 侧走 W8A8，decode 侧走 mid-group W4A8。
+两边的最优解不同，而且差距（1.45× 和 1.1×）都超出噪声带。<br/>
+<b>不要</b>只因为「W4A8 权重更小」就全链路铺开——它在 prefill 和高并发两个区间都是负收益。</div>
+
+<h3>10.1 部署必须显式设置的开关</h3>
+<pre class="code">compilation_config.cudagraph_mode = "FULL_DECODE_ONLY"   # 默认 PIECEWISE 白亏 2 倍；
+                                                          # 传 FULL_AND_PIECEWISE 会被静默降级
+async_scheduling = True                                   # 默认关，值 1.09–1.29×，但不支持 PP
+export ASCEND_RT_VISIBLE_DEVICES=1,2,3,4                  # device 0 已挂死
+export OMP_NUM_THREADS=1                                  # 否则 fork 出来的 worker 会 abort</pre>
+<p><small>⚠ <code>FULL_DECODE_ONLY</code> 在 vllm-ascend 里带红色警告：<i>early experimental… capturing too many batch sizes
+can lead to OOM errors or inference hangs</i>。上游 vLLM v1 的默认值是 <code>FULL_AND_PIECEWISE</code>，
+vllm-ascend 把它降级成 PIECEWISE，注释是 <code>TODO: Full graph is fully supported later</code>。</small></p>
+</div>
+
+<div class="card">
+<h2 class="sec" id="s11">11 · 讨论：FSDP / CP 能不能救 prefill 与大规模？</h2>
+<p><b>观察的出发点</b>：在四种并行里，<b>TP 是唯一攻击 K 的那一个</b>。而 §4.8 已经证明我们的收益域由
+<code>K &gt; K*</code> 界定。那么切 M 而保 K 的并行——<b>FSDP（权重分片）与 CP（上下文并行）</b>——
+在几何上正好避开了杀死 TP 的那个机制。这条值得认真算账，而不是凭直觉接受或否决。</p>
+
+<h3>11.1 四种并行对我们算子的作用</h3>
+<div class="tblwrap"><table>
+<thead><tr><th>并行</th><th>切什么</th><th>对 GEMM 几何的影响</th><th>集合通信的<b>性质</b></th><th>判定</th></tr></thead>
+<tbody>
+<tr style="background:#fdf1f2"><td><b>TP</b></td><td>行并行切 <b>K</b>（列并行切 N）</td><td class="lose">K↓ ⇒ o_proj 1280 &lt; K* ⇒ 跌出收益域</td><td class="lose">激活 all-reduce · <b>延迟受限</b> · 实测 <code>Overlapped=0</code></td><td class="lose">实测打平</td></tr>
+<tr style="background:#eefaf3"><td><b>FSDP</b></td><td>切<b>权重</b>（数据侧切 M）</td><td class="win">K、N <b>完全不变</b>，M↓</td><td class="win">权重 all-gather · <b>带宽受限</b> · <b>可预取</b></td><td class="warn">未验证</td></tr>
+<tr style="background:#eefaf3"><td><b>CP</b></td><td>切<b>序列</b>（即 M）</td><td class="win">K、N <b>完全不变</b>，M↓</td><td class="win"><b>GEMM 侧零集合通信</b>（仅 attention 的 KV ring）</td><td class="warn">未验证</td></tr>
+<tr><td>PP</td><td>切层</td><td class="win">几何<b>完全不变</b></td><td class="flat">rank 间点对点</td><td class="win"><b>已交付 2.0–2.2×</b></td></tr>
+</tbody></table></div>
+
+<h3>11.2 成立的部分：它把「藏不住的通信」换成了「藏得住的通信」</h3>
+<div class="banner ok"><b>这一点比几何论证更强，而且是我们自己实测过的。</b>
+§6.4 那 3632 µs 的 all-reduce 之所以致命，不只是它大，而是它 <b><code>Overlapped = 0</code></b>；
+而我们单独测过 <b>all-reduce 是纯延迟受限的：10 KB 与 640 KB 一个价</b>
+⇒ <b>这类通信在结构上无法用分块流水藏住</b>，切分只会更糟（这正是自研 all-reduce 选择「消掉它」而非「切分它」的原因）。<br/><br/>
+FSDP 的 all-gather 完全不同：world=4 时每层要搬 <b>185.7 MB</b>，<b>牢牢在带宽区</b>
+⇒ 预取下一层权重<b>真的能与本层计算重叠</b>，而且双缓冲只需 2 × 248 MB，在 64 GB 上可以忽略。
+<b>FSDP 针对的正是杀死 TP 的那个机制。</b></div>
+<div class="banner ok"><b>还有一条 W4A8 独有的协同，本项目此前从未写下。</b>
+FSDP 的通信量<b>正比于权重字节</b>。int4 让它比 BF16 FSDP <b>小 4 倍</b>：
+<b>15.85 GB vs 62 GB</b>（每次前向、全模型）。
+⇒ <b>量化在这里不只是省显存，它直接把这套并行方案的通信成本降了 4 倍</b>——
+换句话说，<b>W4A8 让原本不划算的 FSDP 变得可能划算</b>。这是「小模型权重」的一个二阶收益，
+与 §7 的容量收益是同一个来源、不同的兑现方式。</div>
+
+<h3>11.3 盈亏平衡：按<b>本机实测 ring 带宽</b>算出的门槛</h3>
+<div class="tblwrap"><table>
+<thead><tr><th>拓扑</th><th class="num">实测 ring 带宽</th><th class="num">all-gather / 层</th><th class="num">需 M / rank</th><th class="num">全局 tokens / step</th></tr></thead>
+<tbody>
+<tr><td>跨组（2+2，如 <code>2,3,4,5</code>）</td><td class="num">20.14 GB/s</td><td class="num">9.24 ms</td><td class="num">≥ 2292</td><td class="num win"><b>≥ 9.2 K</b></td></tr>
+<tr><td>组内（如 <code>4,5</code>）</td><td class="num">11.31 GB/s</td><td class="num">16.43 ms</td><td class="num">≥ 4077</td><td class="num">≥ 16.3 K</td></tr>
+</tbody></table></div>
+<p><small>world=4 · W4A8 每层权重 247.6 MB（含辅助张量）· all-gather 每 rank 收 <code>(P−1)/P × 247.6 = 185.7</code> MB ·
+计算成本按 §4.4 实测的 <b>4.03 µs / 行 / 层</b>（M=1024 那一档：3711 µs GEMM + 417 µs 量化）。</small></p>
+<div class="banner ok"><b>结论：能藏住，但要求 chunk 足够大。</b>需要把 <code>max_num_batched_tokens</code> 抬到
+<b>约 9K–16K</b>，远高于常用默认值。<b>拓扑选择在这里值 1.78×</b>——
+这与我们已经实测到的「prefill 侧的 TP 一定要挑均衡跨组设备集」是同一条规律，
+因为两者都落在带宽区（组内三个配置读到 11.30–11.31 GB/s，紧到不像巧合）。</div>
+
+<h3>11.4 不成立的部分：它<b>救不了 prefill 的 GEMM</b></h3>
+<div class="banner"><b>几何方向对，但幅度不够。</b>prefill 的 M 是<b>几千</b>；world=4 除下来<b>仍是两千多</b>，
+远在 M=512 之上——而 §4.8 在 M=512 实测的<b>斜率比是 1.00</b>：
+<code>MSD 两遍 Mmad × int4 Cube 2× 速率 = 与一遍 int8 完全相等</code>。
+<b>这是算术恒等，不是实现缺陷</b>，再叠上 +16.8 µs 的固定开销必输。<br/><br/>
+要重新进入收益域需要每 rank 的 M 降到 <b>~128 量级</b>，那意味着 world ≈ 数十，不现实。<br/>
+⇒ <b>FSDP 能让 W4A8 的 prefill「打平」，不能让它「赢」。</b>它的收益要记在<b>容量与通信</b>账上，
+不能记在 GEMM 账上。</div>
+<div class="banner"><b>而 decode 完全不能用 FSDP。</b>M = batch 时每层计算约 <b>0.3 ms</b>，
+而 all-gather 是 <b>9.24 ms</b> ⇒ <b>暴露约 30 倍</b>，无论怎么预取都藏不住。
+<b>FSDP 是纯 prefill / 大 chunk 方案。</b></div>
+
+<h3>11.5 CP 的定位不同，值得单独看</h3>
+<p>CP 切序列（M），<b>权重不动</b> ⇒ <b>GEMM 侧零集合通信</b>，只有 attention 需要 KV 的 ring 交换。
+<b>它是唯一能让我们的算子保持 TP=1 特性的多卡方案</b>——K、N 都不变，没有 all-gather 要藏。
+代价是它<b>不降低每卡权重内存</b>，所以不解决容量问题，需要与 PP 或 FSDP 组合。</p>
+
+<h3>11.6 建议</h3>
+<div class="banner ok"><b>FSDP / CP 值得做原型验证，但要把预期定对</b>：
+收益是<b>「容量 + 通信可隐藏性」</b>，<b>不是</b>「GEMM 加速」。<br/><br/>
+它<b>加强</b>而不是替代 §9 的部署结论：<b>prefill 走 W8A8</b>
+（或 <b>per-channel W4A8</b>——§4.5 实测它在 M=1024 仍赢 W8A8 <b>1.12×</b>，因为它没有分组冲刷；
+代价是要多存一份 int4 权重，但那仍只有 15.6 GB），<b>decode 走 mid-group W4A8</b>。<br/><br/>
+<b>验证顺序建议</b>：先做 §12 的 profile split（它能告诉我们通信在总账里到底占多少），
+再决定 FSDP 原型值不值得——如果连 TP 那笔通信都不是主要矛盾，FSDP 的通信优势也就不值钱。</div>
+<div class="banner warn"><b>本节的证据等级</b>：ring 带宽（11.31 / 20.14 GB/s）、权重字节、
+每行计算成本（4.03 µs/行/层）<b>均为实测</b>；<b>盈亏平衡点 9.2K / 16.3K tokens 是推算</b>，
+未做原型，未计入 all-gather 的启动开销、内存分配抖动与 vLLM 调度器的实际 chunk 行为。
+<b>方向可信，数字待验。</b></div>
+</div>
+
+<div class="card">
+<h2 class="sec" id="s12">12 · 欠账清单与下一步</h2>
+<h3>12.1 阻断「可用性」结论的三项（按优先级）</h3>
+<div class="tblwrap"><table>
+<thead><tr><th>#</th><th>欠账</th><th>为什么阻断</th><th>去向</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><b>真实校准的 W4A8 checkpoint（权重导出器）</b></td><td>至今<b>所有</b>数字都跑在随机权重上；它是 P2 的前置，但本身是独立的工程交付物</td><td class="lose">⬜ backlog</td></tr>
+<tr><td>2</td><td><b>任务门槛拍板 + GSM8K + 一项中文</b></td><td>GLUE −4.5 点是当前唯一的任务指标，而路线图写明「以任务评测为准」</td><td class="lose">⬜ P2 待办</td></tr>
+<tr><td>3</td><td><b>重复性门禁（≥3 次重复 + 离散度）</b></td><td>噪声带（±15%）比很多效果还宽；<b>不钉死就无法证实任何优化</b>。同配置两测曾差 6.9%，而那一期的头条结论本身是 1.16×</td><td class="warn">🟡 P7 第 0 项</td></tr>
+</tbody></table></div>
+
+<h3>12.2 性能侧的下一步（P7 主线 / P8 支线）</h3>
+<ol>
+<li><b>P7 本体（主线，用户 2026-08-19 决定）：先修核心 kernel，上层暂停。</b>
+靶子明确——<b>把 M=16 的 K* 从 1665 压到 1280 以下</b>，只打固定项不碰斜率。
+嫌疑人是 CV 协作：每个量化组的部分和走一趟 <code>L0C→GM→UB</code> + 两次 CrossCore 握手（§4.9）。
+<b>按投影分派那条上层兜底方案明确不做。</b>已接好五个消融开关（<code>ABLATE_AIV/AIC</code>、<code>SPLIT_MSD_FLUSH</code>、
+<code>BF16_FLUSH</code>、<code>BAND_N</code>），改 <code>.cpp</code> 的 <code>#define</code> 即可。</li>
+<li><b>profile split</b>：<code>scripts/profile_p65_tp_split.sh</code> 已备好但未跑。它同时给 P7 和 P8 定价，是两期共同的入口，
+也是唯一能拆开「1.16× 里通信占多少」的手段。<b>不能靠外推分辨</b>。</li>
+<li><b>N 轴 ragged</b>（<code>N % TILE_N == 0</code> 仍在）与 <b><code>BAND_N_CFG</code> 设默认</b>（prefill +2.3–4.8%、逐位一致、零成本）。</li>
+<li><b>P8 drop-in 接入</b>：只在第 2 项显示通信占大头时才开。</li>
+<li><b>FSDP / CP 原型（新增，§11）</b>：切 M 保 K，把 TP 那笔<b>藏不住</b>的 all-reduce 换成<b>可预取</b>的权重 all-gather，且 int4 让流量比 BF16 FSDP 小 4 倍。按实测带宽算，全隐藏门槛是 <b>≥9.2K（跨组）/ 16.3K（组内）tokens/step</b>。<b>预期收益是容量与通信，不是 GEMM 加速</b>——排在第 2 项之后。</li>
+</ol>
+
+<h3>12.3 口径侧的欠账（路线图 §8 第 4 步只算一半）</h3>
+<p><code>ROADMAP.md</code> §6 冻结的是<b>在线服务口径</b>：起 OpenAI 兼容 server、关前缀缓存、报
+<b>TTFT / TPOT / e2e 的 p50/p90/p99</b>，并发 1–64，长上下文 <b>4K–64K</b>（64K 用 YaRN 4.0）。
+本项目交付的是<b>离线进程内引擎口径</b>（<code>LLM()</code> + <code>load_format=dummy</code>），plen ≤ 8192，没有分位数。
+<b>两者形状可比、口径不同，不能互相替代。</b></p>
+<ul>
+<li>⬜ 在线服务口径（TTFT/TPOT 分位数、4K–64K、真 server）</li>
+<li>⬜ 第二个 TP4 副本跑 <code>2,3,6,7</code>，整机聚合吞吐</li>
+<li>⬜ <b>KV 容量实测</b>：§7.3 是按几何推算，需实测特定 <code>gpu_memory_utilization</code> 下 vLLM 真实分配的块数</li>
+<li>⬜ <b>KV cache 量化</b>：本项目只动 Linear 的 W/A，KV 未量化——一条与本方案正交、未做的收益线</li>
+<li>⬜ KV-cache 利用率 / max-batched-tokens / 并发扫描</li>
+<li>⬜ profiling 扩到 attention / host 调度 / ACL Graph / HCCL</li>
+<li>⬜ prefill TP 挑跨组设备（1.78× 带宽，目前只有 microbench）</li>
+<li>⬜ <b>§6.2.2 的「prefill 输 0.64–0.69×」需按分块口径修订</b>——TP 上打平，冲突未解释（§6.4.5）</li>
+</ul>
+</div>
+
+<div class="card">
+<h2 class="sec">13 · 产物索引与复现</h2>
+<h3>13.1 代码</h3>
+<div class="tblwrap"><table>
+<thead><tr><th>路径</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td><code>int4_cube_lab/kernels/midgroup_w4a8_gemm.inc</code></td><td>GEMM 本体，1168 行 / 63 KB，全部计算逻辑（<code>ASYM_CFG</code> 等编译期开关）</td></tr>
+<tr><td><code>int4_cube_lab/kernels/midgroup_quant_a.inc</code></td><td>A 的动态分组量化 + MSD 拆分（独立 kernel = 独立 launch），410 行</td></tr>
+<tr><td><code>int4_cube_lab/kernels/mg_kgeom.h</code></td><td>ragged-K 组几何；AIC/AIV/打包器/CPU 参考<b>共用一份</b>，131 行</td></tr>
+<tr><td><code>npu_ops/kernel/</code></td><td><b>逐字节相同的副本</b>（供 vLLM 侧）。改完两边必须同步，否则 lab 与引擎评的是两个 kernel</td></tr>
+<tr><td><code>npu_ops/host/midgroup_*.cpp</code></td><td><code>torch.ops.npu.midgroup_{w4a8_gemm,quant_a}</code></td></tr>
+<tr><td><code>npu_ops/python/vllm_engine_patch.py</code></td><td>加载期转换器 + <code>MidGroupLinearMethod</code></td></tr>
+<tr><td><code>npu_ops/kernel/peer_allreduce_f32.cpp</code> 等</td><td>自研 all-reduce（P8 资产，已验完定完价，未接入）</td></tr>
+<tr><td><code>fakequant_lab/</code></td><td>P1/P2 的 fake-quant harness、GPTQ、PPL / GLUE 评测链路</td></tr>
+</tbody></table></div>
+<div class="banner warn">⚠ <b><code>.inc</code> 改动不触发 kernel 重编</b>——<code>ascendc_library</code> 不认 <code>.inc</code> 依赖，
+裸 <code>make</code> 会评一份<b>旧 kernel</b>。必须走 <code>bash int4_cube_lab/scripts/build.sh</code>。</div>
+
+<h3>13.2 分期报告</h3>
+<div class="tblwrap"><table>
+<thead><tr><th>报告</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td><code>reports/midgroup/P1_harness.md</code></td><td>fake-quant 定义、自检、RTN 基线</td></tr>
+<tr><td><code>reports/midgroup/P3_kernel.md</code></td><td>数值契约、正确性/压测/负对照、kernel 级性能</td></tr>
+<tr><td><code>reports/midgroup/P4_e2e.md</code></td><td>接入 vLLM、三个计时陷阱、五路 × 八档</td></tr>
+<tr><td><code>reports/midgroup/P6_pp.md</code> / <code>.html</code></td><td><b>PP 交付报告</b>（本报告 §6.1–6.3 的来源）</td></tr>
+<tr><td><code>reports/midgroup/P6.5_ragged.md</code> / <code>.html</code></td><td>ragged-K 契约、零退化验证、TP 路线定价</td></tr>
+<tr><td><code>reports/midgroup/P6.5_tp_matrix.md</code></td><td><b>TP=4 交付矩阵</b>（本报告 §6.4 的来源）</td></tr>
+<tr><td><code>int4_cube_lab/REPORT_W4A8.md</code></td><td>per-channel W4A8 与 INT4 cube 2× 的地基</td></tr>
+<tr><td><code>MGCKPT/P0…P8*.md</code></td><td>逐期执行记录，含全部「决策与坑」</td></tr>
+</tbody></table></div>
+
+<h3>13.3 复现命令</h3>
+<pre class="code"># ---- kernel 级 ----
+export ASCEND_RT_VISIBLE_DEVICES=1
+bash int4_cube_lab/scripts/build.sh            # 必须，裸 make 会评旧 kernel
+bash int4_cube_lab/scripts/check_ragged.sh     # 62/62 正确性门禁
+
+# ---- 层级 / 引擎（TP=1）----
+.venv/bin/python npu_ops/python/bench_engine_decode.py \
+    --arm w4a8 --layers 16 --batch 1 --out-len 64 \
+    --cudagraph-mode FULL_DECODE_ONLY --out results/engine.csv
+# arm ∈ {bf16, w8a8-native, w4a8-native, w8a8, w4a8}
+# 每层斜率 = (step_us@16层 − step_us@4层) / 12
+
+# ---- e2e · PP（PP=4 / L=64 就是真实 64 层模型）----
+bash int4_cube_lab/scripts/sweep_p6_pp_isorank.sh
+OUT=int4_cube_lab/results/p6_pp_concurrency.csv LPRS="16" \
+  BATCHES="1 16 64 128 256" ARMS="bf16 w8a8 w4a8 w8a8-native w4a8-native" \
+  bash int4_cube_lab/scripts/sweep_p6_pp_isorank.sh
+bash int4_cube_lab/scripts/sweep_p6_pp_longctx.sh     # 解码与 prefill 分离
+
+# ---- e2e · TP ----
+bash int4_cube_lab/scripts/sweep_p65_tp_e2e.sh        # 五 arm × 并发轴 + 长上下文轴 + prefill
+bash int4_cube_lab/scripts/profile_p65_tp_split.sh    # 未跑：拆 1.16× 里的通信占比</pre>
+<p><small>⚠ 多进程 profiling <b>必须手动</b> <code>torch_npu.profiler.profiler.analyse(&lt;rank_dir&gt;)</code>
+才会生成 <code>ASCEND_PROFILER_OUTPUT/</code>；profiling 开着时绝对值偏大，<b>只读比例、不读绝对值</b>。</small></p>
+</div>
+
+<div class="card">
+<h2 class="sec">14 · 结语</h2>
+<p><b>执行侧</b>：mid-group W4A8 从「910B4 到底有没有 INT4 cube」这个怀疑出发，走完了
+INT4 cube 验证 → MSD 拆分 → mid-group 流水 → 非对称 → ragged-K → 打包成 torch 算子 →
+在真 vLLM 引擎里被 ACL 图捕获、replay、四种投影全部接管、端到端生成，
+数值上有逐位/逐字节/负对照三级门禁把关，PP=4 上跑通了真实的 64 层 QwQ-32B。</p>
+<p><b>性能侧</b>：<b>在「小 M × 大 K × 不切 K 的并行形态」这个被机理解释清楚的区间里，方案是成立的</b>
+——PP=4 解码对 BF16 2.0–2.2×、对我们自己的 W8A8 约 1.1×、8K 长上下文仍 2.05× 且劣化最小。
+<b>区间之外它一致地输</b>：prefill（斜率比归零）、高并发（固定开销随 M 涨）、TP 切 K（K &lt; K*）。
+这三处不是三个 bug，是<b>同一笔固定开销</b>在三个方向上的投影，靶子已经量化成一个数字：把 M=16 的 <code>K*</code> 从 1665 压到 1280 以下。</p>
+<p><b>内存侧</b>：这是唯一一条<b>不随工作点换位</b>的收益——权重 <b>62 GB → 19 GB（3.5×）</b>，计算值与磁盘实测互相验证，分组量化的元数据开销仅 1.3%。64 GB 单卡上 <b>BF16 装不下而 W4A8 装下且余 41.6 GB</b>，KV 容量 <b>1.6× vs 我们的 W8A8</b>。<b>这是能力差异而非速度差异</b>；且它让 FSDP 这类<b>流量正比于权重字节</b>的并行方案通信成本直接降 4 倍（§11）。但要注意它与延迟收益<b>不指向同一个工作点</b>：多出来的 KV 空间应当用来换<b>更长上下文</b>（我们最强）而非<b>更大 batch</b>（我们输）。</p>
+<p><b>可用性侧</b>：<b>还不能宣称</b>。权重是随机的，P2 的任务门禁没过，重复性门禁没做。
+这三件事和性能优化正交，可以并行推进，但<b>在它们完成之前，本报告里的每一个数字都只是延迟数字。</b></p>
+</div>
+
+<div class="card" style="text-align:center;color:var(--muted);font-size:13px">
+生成于 2026-08-31 · 数据截止 P6.5 收工（2026-08-19）· 汇总自 <code>MGCKPT/P0–P8</code> 与 <code>reports/midgroup/</code><br/>
+本报告不产生新数据；每一个数字都可追溯到上表列出的 CSV / 报告。
+</div>
+
+</div>
+</body>
+</html>

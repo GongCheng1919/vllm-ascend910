@@ -31,13 +31,25 @@ function(add_op_test op_name)
     add_executable(${op_name}_test
         host/main_${op_name}.cpp
         host/gemm_ref.cpp)
-    target_include_directories(${op_name}_test PRIVATE ${_CANN_INC} host)
+    # `kernels` is on the host include path for mg_kgeom.h: the ragged-K group
+    # geometry has exactly ONE definition, shared by the kernel, the packer and
+    # the CPU reference (P5 D1 -- two copies is how the .inc drifted before).
+    target_include_directories(${op_name}_test PRIVATE ${_CANN_INC} host kernels)
     target_link_directories(${op_name}_test PRIVATE ${_CANN_LIB})
     target_link_libraries(${op_name}_test PRIVATE ${op_name}_kernel ascendcl runtime)
     if(OpenMP_CXX_FOUND)
         target_link_libraries(${op_name}_test PRIVATE OpenMP::OpenMP_CXX)
     endif()
 endfunction()
+
+# Host-only gate for the ragged-K layout (no NPU, ~1 s).  Proves that the group
+# zero padding is int32-EXACT and that aligned shapes are byte-identical to the
+# pre-ragged packers.  Run it before touching either .inc.
+add_executable(ragged_layout_test host/ragged_layout_test.cpp host/gemm_ref.cpp)
+target_include_directories(ragged_layout_test PRIVATE host kernels)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(ragged_layout_test PRIVATE OpenMP::OpenMP_CXX)
+endif()
 
 # TILE_M=128 (compute-bound shapes) plus short-tile builds for decode-shaped M.
 add_op_test(perchannel_int4_gemm)
@@ -103,6 +115,16 @@ add_op_test(midgroup_w4a8_gemm_m128_g1024_asym_bf16ws)
 add_op_test(midgroup_w4a8_gemm_m64_g1024_asym_nofix)
 add_op_test(midgroup_w4a8_gemm_m64_g1024_asym_dmaonly)
 
+# P5 D11: L1 slab granularity sweep at TILE_M=128 -- STATICALLY PROVEN DEAD.
+# Growing the slab (TARGET_GROUP_KB_CFG) to hold >1 group fails the L1 budget
+# assert (2*(TILE_MC+TILE_N)*GROUP_KB <= 512KB => GROUP_KB <= 682B, and
+# GROUP_KB must be a multiple of QGROUP_PAD_KB=512 => exactly 512 => one
+# group per slab).  The per-group IssueGroupLoad emission tax is a structural
+# consequence of L1 capacity, not a code choice (same class of proof as the
+# TILE_N=64 paper kill, P5 3''.5).  Builds left out intentionally.
+# add_op_test(midgroup_w4a8_gemm_m128_g1024_asym_gkb1024)
+# add_op_test(midgroup_w4a8_gemm_m128_g1024_asym_gkb2048)
+
 # Activation-side quantiser: bf16 -> two int4 planes + per-group scale/ksum.
 add_op_test(midgroup_quant_a_g1024)
 add_op_test(midgroup_w4a8_gemm_m16_g1024_asym_dmaonly_gkb512)
@@ -128,6 +150,13 @@ add_op_test(midgroup_w4a8_gemm_m16_g512_asym)
 add_op_test(midgroup_w4a8_gemm_m16_g512_asym_nofix)
 add_op_test(midgroup_w4a8_gemm_m16_g256_asym)
 add_op_test(midgroup_w4a8_gemm_m16_g256_asym_nofix)
+
+# P9 small-K D1 (2026-08-20): deeper L1 slab at TP-split GK (tkb1536) tested --
+# NEUTRAL (gk512 0.975x, gk256 1.006x, noise band).  MTE2 start-stop is NOT the
+# small-K bottleneck; left off the default build.  Probe files retained as
+# midgroup_w4a8_gemm_m16_g{256,512}_asym_tkb1536.cpp if ever revisited.
+# add_op_test(midgroup_w4a8_gemm_m16_g256_asym_tkb1536)
+# add_op_test(midgroup_w4a8_gemm_m16_g512_asym_tkb1536)
 add_op_test(midgroup_w4a8_gemm_m64_g512_asym)
 add_op_test(midgroup_w4a8_gemm_m64_g512_asym_nofix)
 add_op_test(midgroup_w4a8_gemm_m64_g256_asym)

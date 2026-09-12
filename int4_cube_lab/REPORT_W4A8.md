@@ -288,3 +288,76 @@ W8A8 / W4A8-pc / W4A4。这一轮把测试换成 **QwQ-32B 的四个 Linear**（
    次数 ∝ 组数"的解释，而 per-channel 每 tile 只有一次。
 4. **结论**：910B4 上 W4A8 就用 per-channel；mid-group 的灵活性（每组独立 scale，
    对组内 outlier 更稳）要付实打实的性能税，GK 越大越接近 per-channel，但追不上。
+
+---
+
+# 追加（2026-08-19 第四轮）：M=64 划线、瓶颈归因与一次数值回归告警
+
+本轮以 910B4 实测回答三个问题：mid-group 在**什么 M 下才真正赢 W8A8**、
+时间瓶颈定位到什么层级、以及为什么 BAND 默认化被暂缓。
+
+## 4.1 划线：M=64（64 并发）mg 已全面超过 W8A8，用的是默认 int32 中转
+
+`results/m64_line_check.csv`，cold · median-of-3 · QwQ 四投影 · K=5120（G=5）：
+
+| 投影 | N, K | W8A8 µs | mg-int32 µs | mg/W8A8 | 判定 |
+|---|---|---:|---:|---:|---|
+| qkv | 7168, 5120 | 46.76 | **38.35** | 0.82× | ✅ 快 1.22× |
+| o | 5120, 5120 | 35.85 | **30.89** | 0.86× | ✅ 快 1.16× |
+| gate_up | 55296, 5120 | 285.03 | **186.36** | 0.65× | ✅ 快 1.53× |
+| down | 5120, 27648 | 143.90 | **108.57** | 0.75× | ✅ 快 1.33× |
+
+**重要更正**：正文 8.2 第 2 点说"mid-group 所有 gk 都慢于 per-channel、且大 M 连
+W8A8 都打不过"——那条针对的是 `M=512/1024`（tile=128）。**在 M=64（tile=64）
+四个投影 mg 全部超过 W8A8（1.16–1.53×）**。本文 8.2 的"慢 5–13%"是针对
+per-channel 的，per-channel 在 decode 档本来就大幅领先 W8A8，两者不矛盾：
+**mg ≤ pc < W8A8 的性能序在 M≤64 成立，划线的"超过 W8A8"达标。**
+
+## 4.2 瓶颈定位：AIC 的 GM→L1 节奏（MTE2 82%），不是带宽、不是 AIV、不是 scalar
+
+`msprof`（PipeUtilization，qkv M=512，见 `po_mg_pipe/`）：
+
+| 指标 | mg dmaonly（纯搬运） | perchannel w4a8 |
+|---|--:|--:|
+| AIC MTE2 忙率 | 0.82 | 0.75 |
+| AIC scalar | 0.82 | 0.84 |
+| AIC Fixpipe | ~0 | 0.11 |
+| AIV vec / mte2 | ≈0 | 0.15 / 0.12 |
+
+- **MTE2 只有 82%**：折 0.93 TB/s < HBM ~1.1–1.25 TB/s 有效峰值 → **没撞带宽墙**。
+- **Fixpipe 只有 0.11**（折 ~2.9 TB/s）→ 写路径不慢；nofix 省 49µs 的真因是松掉
+  L0C 端口/credit 同步链，不是 Fixpipe 吞吐。
+- **scalar 与 MTE2 同步推进（都 0.82）**，但静态数指令量级不足 30% 预算。
+- 结论：时间花在 **L1 depth-2 双缓冲 + 组边界发射的节奏反压**上，是结构性节奏税，
+  不是某条指令串行，也不是带宽。P5 四轮调度改动全部 ≤5% 与此一致。
+
+## 4.3 已逐一证伪的方向（不必再重复投入）
+
+| 方向 | 结论 |
+|---|---|
+| 加深 workspace slot（2→10，id 轮询全异步）| P5 §3'.1 已判死：noaiv 证明 AIV 不是瓶颈，无等待可掩盖；L0C depth=1 是硬件限不死软件加深 |
+| cube 做 diag(scale)·INT32·diag(scale) | 指令集无此形态（L0C 是 int32、cube 只收 int4/int8）；AIC/AIV 双核并行无"切换核心"机制；D10 的 DEQF16 是唯一出口且实测负收益 |
+| bf16/half workspace 中转 | D10 实测**减半字节反而慢 3.9–6.2%**（fp16 尾巴 + AIV 多 3 条向量指令）|
+| 放大 L1 slab（fewer per-group loads）| **静态证伪**：`2*(256+128)*GROUP_KB ≤ 512KB` ⇒ GROUP_KB=512 ⇒ 每组一个 slab，发射税结构性不可摊薄 |
+| 大 GK（2048）| GK 是权重格式属性，非按 M 可变；改它要重开 P2 精度评估 |
+| TILE_M=64 改派 | P5 §3''.4：因 1/TILE_M 权重流量翻倍，反而慢 1.17–1.38× |
+
+净判断：**M=64 的 decode 档已达标，默认 int32 中转即可；剩余大 M 税是 MSD 双平面
+int32 workspace 的结构性代价**——要省只能回 `MID_GROUP_ROADMAP` 层面讨论大 M 是否
+另走 kernel 家族。
+
+## 4.4 ⚠️ 数值回归告警（影响任何同步/部署，暂缓 BAND 默认化）
+
+做 BAND_N 默认化（P5 第 7 步）前置检查时发现：**当前工作区 midgroup（含 ragged-K
+改造，`mg_kgeom.h`）在 N 较大/每 block 多 tile 时有确定性数值错位**：
+
+- `qkv M=512 N=7168 K=5120 --check`: **967405 mismatches, snr 7.6dB**（`mismatch=0` 的
+  P5 记录是旧提交版数据）。
+- `perchannel_w4a8_gemm` 同 shape **PASS**（snr 94.9）→ 问题特定于 midgroup。
+- `N=2560` 也 FAIL；`M=128/N=2560`、`M=128/N=128` **PASS** → 随每 block tile 数变化，
+  **与 BAND_N 无关**（BAND=0/1 结果一致，profiling/划线测试均为 `--profile` 未校验数值，
+  故此前未暴露）。
+
+**因此 BAND_N 默认化、同步 npu_ops、e2e 均被该回归阻塞**，lest 把错 kernel 部署进
+vLLM 路径。修复属独立排查（workspace 双 slot 跨 tile 复用 / ragged 打包或寻址），
+不在本轮范围内。本会话对 band 的改动已 revert，lab 与 npu_ops 保持一致为 `BAND_N=0`。

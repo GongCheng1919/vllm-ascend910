@@ -17,9 +17,14 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+.venv-*/
+
+# ---- stray npm lockfile (no package.json in tree) ----
+package-lock.json
 
 # ---- large run artifacts (keep the CSVs, drop the dumps) ----
 results/*/
+# top-level ad-hoc results scratch dir: its dump subdirs are covered above
 *.bin
 *.npy
 *.npz
@@ -29,6 +34,9 @@ results/*/
 *.gguf
 *.prof
 *.json.gz
+# run logs / progress files (this commit keeps CSV evidence, not logs)
+*.log
+*.progress
 
 # msprof output
 *PROF_*/

@@ -360,6 +360,35 @@ int4_cube_lab/results/
 
 ---
 
+## 11. 未完成清单（2026-08-19 审计，P6.5 收工时做）
+
+**§8 四步的真实状态**：第 2、3 步 ✅；第 1 步 ❌；第 4 步 🟡。
+
+**第 4 步为什么只算一半。** `ROADMAP.md` §6 冻结的是**在线服务口径**：起
+OpenAI 兼容 server、关前缀缓存、卡 `0,1,4,5`，报 **TTFT / TPOT / e2e 的
+p50/p90/p99**，并发 `1,4,8,16,32,64`，长上下文 **4K–64K**（64K 用 YaRN 4.0）。
+P6.5 D20 交付的是**离线进程内引擎口径**（`LLM()` + `load_format=dummy`），
+plen ≤ 8192，没有分位数。**两者形状可比、口径不同，不能互相替代。**
+
+| 欠账 | 来源 | 2026-08-19 去向 |
+|---|---|---|
+| **主工作负载 ≥3 次重复 + 离散度** | `ROADMAP.md` §6 Exit Criteria | ✅ **已排：P7 第 0 项**。理由：噪声带（±15%）比我们的效果还宽，不钉死就无法证实任何优化 |
+| 低维度分片下的算子效率（行并行 eff@4=0.54）| P6.5 D20 | ✅ **P7 主体** |
+| 通信 kernel 接进引擎 | P6.5 D16–D19 | ✅ **P8，支线** |
+| N 轴 ragged（`N % TILE_N`）、`BAND_N_CFG` 设默认 | P6.5 §2 | ✅ **并入 P7** |
+| **真实校准的 W4A8 checkpoint（权重导出器）** | §8 第 1 步 / `ROADMAP.md` §7 第 7 项 | ⬜ **backlog**。至今所有数字都是随机权重；它是 P2 的前置，但**本身是独立的工程交付物** |
+| **在线服务口径**（TTFT/TPOT 分位数、4K–64K、真 server）| §8 第 4 步的另一半 | ⬜ **backlog** |
+| 第二个 TP4 副本跑 `2,3,6,7`，整机聚合吞吐 | `ROADMAP.md` §7 第 1 项 | ⬜ backlog |
+| KV-cache 利用率 / max-batched-tokens / 并发扫描 | `ROADMAP.md` §7 第 3 项 | ⬜ backlog |
+| profiling 扩到 attention / host 调度 / ACL Graph / HCCL | `ROADMAP.md` §7 第 4 项 | 🟡 **P7 第 1 项吃掉一部分**（step_trace 四项分解），其余 backlog |
+| prefill TP 挑跨组设备（1.78× 带宽，只有 microbench）| P6.5 D11 | ⬜ backlog |
+| **P6 D13「prefill 输 0.64–0.69×」需按分块口径修订** | P6.5 D20 | ⬜ backlog，**当前是推测不是结论** |
+
+> P2（精度门禁）按用户 2026-08-19 的指示不在本次审计范围内，状态见
+> `MGCKPT/P2_ACCURACY.md`：**被挂起的 go/no-go，不是通过。**
+
+---
+
 ## 附：阶段依赖
 
 ```

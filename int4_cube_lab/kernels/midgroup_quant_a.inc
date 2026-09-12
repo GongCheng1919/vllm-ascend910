@@ -4,12 +4,21 @@
 //   GK_CFG       quantisation group size along K, in ELEMENTS
 //   KERNEL_NAME  the extern "C" __global__ symbol to emit
 //
-// Contract (G = K / GK groups; group-major outputs, matching the GEMM):
-//   x:       [M,  K]   bf16   -- the activation
-//   a_hi:    [Mp, K/2] int4 packed  -- high nibbles, in [-8,7]
-//   a_lo:    [Mp, K/2] int4 packed  -- low nibbles biased by -8, in [-8,7]
-//   a_scale: [G, Mp]   bf16
-//   a_ksum:  [G, Mp]   int32  -- NEGATED sum_{k in g} A_q[m,k]  (see the GEMM's D6)
+// Contract (G = ceil(K / GK) groups; group-major outputs, matching the GEMM):
+//   x:       [M,  K]      bf16   -- the activation, ARBITRARY K
+//   a_hi:    [Mp, Kpad/2] int4 packed  -- high nibbles, in [-8,7]
+//   a_lo:    [Mp, Kpad/2] int4 packed  -- low nibbles biased by -8, in [-8,7]
+//   a_scale: [G, Mp]      bf16
+//   a_ksum:  [G, Mp]      int32  -- NEGATED sum_{k in g} A_q[m,k]  (see GEMM D6)
+//
+// RAGGED K.  The final group holds `real` in [1, GK] elements and is emitted in
+// the grouped PADDED layout of mg_kgeom.h -- zero-filled up to a whole int4
+// fractal.  This kernel gets that for free: it zeroes the group's UB tail before
+// the vector work, after which every op below stays FULL WIDTH and unchanged.
+//   - amax: appending zeros cannot raise a max of absolute values -> same scale
+//   - q = rint(0/s) = 0, and -sum_k q is unchanged -> same a_ksum
+//   - MSD of q=0 is hi=0, lo=-8, which is precisely the encoding the host packer
+//     writes into padded slots (`0x88`), so kernel and packer agree bit for bit.
 //
 // Mp >= M is the GEMM's TILE_M-padded row count, and it is a multiple of kBr.
 // Producing the padded rows HERE, as zeros, is what keeps the caller free of any
@@ -66,6 +75,12 @@
 
 #include "kernel_operator.h"
 
+// The ragged-K group geometry, shared verbatim with the GEMM, the packer and the
+// CPU reference -- one definition, so nothing can disagree about where a group
+// starts or how wide the last one is.
+#define MG_KGEOM_FN __aicore__ inline constexpr
+#include "mg_kgeom.h"
+
 using namespace AscendC;
 
 namespace {
@@ -87,6 +102,8 @@ constexpr float kQMax     = 127.0f;
 // torch.finfo(torch.bfloat16).tiny -- same exponent range as fp32, so exact.
 constexpr float kTinyBf16 = 1.17549435e-38f;
 
+// GK a multiple of 64 keeps the fold/reduce repeat counts exact AND makes the
+// group's padded span equal GK, so only the FINAL group is ever short.
 static_assert(GK % kBlkF == 0, "GK must be a multiple of 64");
 static_assert(kBr % kSub == 0, "kBr must be a multiple of kSub");
 
@@ -99,7 +116,10 @@ void KERNEL_NAME(GM_ADDR x, GM_ADDR a_hi, GM_ADDR a_lo,
 {
     if ASCEND_IS_AIC { return; }
 
-    const uint32_t numG    = K / GK;
+    const uint32_t numG    = mgk::NumGroups(K, GK);
+    // The output planes are Kpad/2 bytes per row, not K/2: the final group is
+    // padded up to a fractal (mg_kgeom.h).
+    const uint32_t KbPad   = mgk::KPadElems(K, GK, mgk::kCubeKElemsInt4) / 2;
     // Jobs cover the PADDED rows; only the load is clamped to the real ones.
     const uint32_t rowJobs = (Mp + kBr - 1) / kBr;
     const uint64_t jobs    = (uint64_t)rowJobs * numG;
@@ -114,8 +134,8 @@ void KERNEL_NAME(GM_ADDR x, GM_ADDR a_hi, GM_ADDR a_lo,
     GlobalTensor<int8_t> hiGm, loGm;
     GlobalTensor<int32_t> ksGm;
     xGm.SetGlobalBuffer(reinterpret_cast<__gm__ bfloat16_t*>(x), (uint64_t)M * K);
-    hiGm.SetGlobalBuffer(reinterpret_cast<__gm__ int8_t*>(a_hi), (uint64_t)Mp * (K / 2));
-    loGm.SetGlobalBuffer(reinterpret_cast<__gm__ int8_t*>(a_lo), (uint64_t)Mp * (K / 2));
+    hiGm.SetGlobalBuffer(reinterpret_cast<__gm__ int8_t*>(a_hi), (uint64_t)Mp * KbPad);
+    loGm.SetGlobalBuffer(reinterpret_cast<__gm__ int8_t*>(a_lo), (uint64_t)Mp * KbPad);
     sGm.SetGlobalBuffer(reinterpret_cast<__gm__ bfloat16_t*>(a_scale), (uint64_t)numG * Mp);
     ksGm.SetGlobalBuffer(reinterpret_cast<__gm__ int32_t*>(a_ksum), (uint64_t)numG * Mp);
 
@@ -171,13 +191,21 @@ void KERNEL_NAME(GM_ADDR x, GM_ADDR a_hi, GM_ADDR a_lo,
         const uint32_t rowsStore = (Mp - row0 < kBr) ? (Mp - row0) : kBr;
         const uint32_t rowsLoad  = (row0 >= M) ? 0u
                                               : ((M - row0 < kBr) ? (M - row0) : kBr);
+        // This group's real width, and the padded width that gets stored.
+        const uint32_t gReal = mgk::GroupRealElems(g, K, GK);
+        const uint32_t gPad  = mgk::GroupPadElems(g, K, GK, mgk::kCubeKElemsInt4);
+        const bool     shortG = (gReal < GK);
 
         // Rows the load does not cover -- the tail of a ragged job and every row
         // of a fully-padded one -- are zeroed here.  Stored padded rows come out
         // as scale=tiny / q=0 / ksum=0, which contributes nothing to the GEMM;
         // rows beyond `rowsStore` are quantised too (cheaper than masking) but
         // never stored, so they only have to be finite.
-        if (rowsLoad < kBr) {
+        //
+        // A SHORT group zeroes the whole job buffer for the same reason: the
+        // elements past `gReal` must read as 0 so the full-width vector ops below
+        // stay untouched.  Once per K sweep, so its cost is irrelevant.
+        if (rowsLoad < kBr || shortG) {
             // half's zero bit pattern is bf16's, and there is no scalar bf16
             // conversion on this backend -- duplicate through the half view.
             Duplicate(bX.Get<half>(), static_cast<half>(0.0f), kJobElems);
@@ -195,11 +223,44 @@ void KERNEL_NAME(GM_ADDR x, GM_ADDR a_hi, GM_ADDR a_lo,
         WaitFlag<HardEvent::V_MTE2>(evVMte2);
 
         if (rowsLoad > 0) {
-            DataCopyExtParams ip{static_cast<uint16_t>(rowsLoad),
-                                 static_cast<uint32_t>(GK * sizeof(bfloat16_t)),
-                                 static_cast<uint32_t>((K - GK) * sizeof(bfloat16_t)), 0u, 0u};
-            DataCopyPadExtParams<bfloat16_t> ipad{false, 0, 0, static_cast<bfloat16_t>(0.0f)};
-            DataCopyPad(ubX, xGm[(uint64_t)row0 * K + (uint64_t)g * GK], ip, ipad);
+            const uint64_t xOff = (uint64_t)row0 * K + (uint64_t)g * GK;
+            if (!shortG) {
+                DataCopyPadExtParams<bfloat16_t> ipad{false, 0, 0,
+                                                      static_cast<bfloat16_t>(0.0f)};
+                DataCopyExtParams ip{static_cast<uint16_t>(rowsLoad),
+                                     static_cast<uint32_t>(GK * sizeof(bfloat16_t)),
+                                     static_cast<uint32_t>((K - GK) * sizeof(bfloat16_t)),
+                                     0u, 0u};
+                DataCopyPad(ubX, xGm[xOff], ip, ipad);
+            } else {
+                // A short group reads gReal < GK elements per row but must still
+                // land them GK apart in UB, so the UB rows keep the sub-tile
+                // layout the vector ops assume.  One burst per row rather than a
+                // strided multi-row copy: dstStride's unit (bytes vs 32 B blocks)
+                // differs by direction, and a row-pitch bug here would show up as
+                // a few wrong ROWS -- the same tell as the M-padding race this
+                // kernel already carries a barrier for.  It costs <=16 extra
+                // MTE3-class issues on ONE group out of G.
+                //
+                // isPad MUST be true here.  A DataCopyPad whose blockLen is not a
+                // multiple of 32 B still moves a whole number of 32 B blocks, so
+                // with isPad=false the hardware brings in the elements that FOLLOW
+                // the group in GM -- real activation values, not zeros.  Their
+                // effect is invisible in the scale (an amax over the same
+                // distribution rarely moves) and fatal in a_ksum and in the packed
+                // planes: exactly the symptom this cost a debug cycle to find.
+                // isPad + rightPadding zero-fills the block tail instead.
+                const uint32_t realBytes = gReal * sizeof(bfloat16_t);
+                const uint32_t rightPadElems =
+                    (mgk::CeilTo(realBytes, 32u) - realBytes) / sizeof(bfloat16_t);
+                DataCopyPadExtParams<bfloat16_t> ipad1{
+                    true, 0, static_cast<uint8_t>(rightPadElems),
+                    static_cast<bfloat16_t>(0.0f)};
+                DataCopyExtParams ip1{1u, realBytes, 0u, 0u, 0u};
+                for (uint32_t r = 0; r < rowsLoad; ++r) {
+                    DataCopyPad(ubX[r * GK], xGm[xOff + (uint64_t)r * K], ip1, ipad1);
+                }
+            }
         }
         SetFlag<HardEvent::MTE2_V>(evM2V);
         WaitFlag<HardEvent::MTE2_V>(evM2V);
@@ -308,12 +369,25 @@ void KERNEL_NAME(GM_ADDR x, GM_ADDR a_hi, GM_ADDR a_lo,
         SetFlag<HardEvent::V_MTE3>(evVMte3);
         WaitFlag<HardEvent::V_MTE3>(evVMte3);
 
-        DataCopyExtParams op{static_cast<uint16_t>(rowsStore),
-                             static_cast<uint32_t>(GK / 2), 0u,
-                             static_cast<uint32_t>((K - GK) / 2), 0u};
-        const uint64_t planeOff = (uint64_t)row0 * (K / 2) + (uint64_t)g * (GK / 2);
-        DataCopyPad(hiGm[planeOff], ubHi4, op);
-        DataCopyPad(loGm[planeOff], ubLo4, op);
+        // Destination offset uses the PADDED row pitch and the group's padded
+        // start -- both from mg_kgeom.h, so the GEMM reads exactly what lands here.
+        const uint64_t planeOff = (uint64_t)row0 * KbPad
+                                + mgk::GroupOffsetElems(g, GK, mgk::kCubeKElemsInt4) / 2;
+        if (!shortG) {
+            DataCopyExtParams op{static_cast<uint16_t>(rowsStore),
+                                 static_cast<uint32_t>(GK / 2), 0u,
+                                 static_cast<uint32_t>(KbPad - GK / 2), 0u};
+            DataCopyPad(hiGm[planeOff], ubHi4, op);
+            DataCopyPad(loGm[planeOff], ubLo4, op);
+        } else {
+            // Store gPad/2 bytes per row out of a GK/2-byte UB row pitch -- one
+            // burst per row, for the same reason as the load above.
+            DataCopyExtParams op1{1u, static_cast<uint32_t>(gPad / 2), 0u, 0u, 0u};
+            for (uint32_t r = 0; r < rowsStore; ++r) {
+                DataCopyPad(hiGm[planeOff + (uint64_t)r * KbPad], ubHi4[r * (GK / 2)], op1);
+                DataCopyPad(loGm[planeOff + (uint64_t)r * KbPad], ubLo4[r * (GK / 2)], op1);
+            }
+        }
 
         // Group-major layout puts this job's `rowsStore` scales and ksums
         // contiguously -- one burst each, instead of the 2-byte and 4-byte

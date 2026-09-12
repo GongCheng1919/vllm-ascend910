@@ -20,6 +20,7 @@
 // P2's accuracy numbers not apply to the deployed kernel.
 
 #include "utils.h"
+#include "../kernel/mg_kgeom.h"
 #include "aclrtlaunch_midgroup_quant_a_g1024.h"
 
 namespace ascendc_path {
@@ -43,15 +44,19 @@ std::vector<at::Tensor> run_midgroup_quant_a(const at::Tensor &x)
 
     const int64_t M = x.size(0);
     const int64_t K = x.size(1);
-    TORCH_CHECK(K % kGroup == 0, "midgroup_quant_a: K must be a multiple of ", kGroup,
-                "; got ", K);
-    const int64_t G = K / kGroup;
+    // K is ARBITRARY: the kernel emits the group-padded layout of mg_kgeom.h, so
+    // the planes are Kpad/2 bytes per row and the final group may be short.
+    const int64_t G = static_cast<int64_t>(
+        mgk::NumGroups(static_cast<unsigned>(K), static_cast<unsigned>(kGroup)));
+    const int64_t KbPad = static_cast<int64_t>(
+        mgk::KPadElems(static_cast<unsigned>(K), static_cast<unsigned>(kGroup),
+                       mgk::kCubeKElemsInt4)) / 2;
 
     const int64_t Mp = CeilTo(M, TileMFor(M));
 
     const at::Tensor xc = x.contiguous();
-    at::Tensor a_hi   = at::empty({Mp, K / 2}, x.options().dtype(at::kChar));
-    at::Tensor a_lo   = at::empty({Mp, K / 2}, x.options().dtype(at::kChar));
+    at::Tensor a_hi   = at::empty({Mp, KbPad}, x.options().dtype(at::kChar));
+    at::Tensor a_lo   = at::empty({Mp, KbPad}, x.options().dtype(at::kChar));
     at::Tensor a_scale = at::empty({G, Mp}, x.options().dtype(at::kBFloat16));
     at::Tensor a_ksum  = at::empty({G, Mp}, x.options().dtype(at::kInt));
 

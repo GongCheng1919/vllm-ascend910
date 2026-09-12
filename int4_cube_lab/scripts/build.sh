@@ -18,19 +18,39 @@ if [ -z "${ASCEND_HOME_PATH:-}" ]; then
     fi
 fi
 
+# `ascendc_library` does not track the .inc files its .cpp wrappers include, so
+# editing a .inc rebuilds NOTHING and the next test run silently grades a STALE
+# kernel -- the same shape of failure as P6 D8 (a path that does no work looks
+# exactly like one that works).  Touch every wrapper whose .inc is newer.
+for inc in kernels/*.inc kernels/*.h; do
+    [ -f "${inc}" ] || continue
+    base="$(basename "${inc}")"
+    for cpp in kernels/*.cpp; do
+        if grep -q "\"${base}\"" "${cpp}" && [ "${inc}" -nt "${cpp}" ]; then
+            echo "  [dep] ${base} is newer than ${cpp} -- touching to force a rebuild"
+            touch "${cpp}"
+        fi
+    done
+done
+
 # Optional: target specific test
 TARGET="${1:-}"
 
-mkdir -p build
-cd build
+# BUILD_DIR lets a second CANN (e.g. the 9.1.0 probe in $HOME/Ascend, P10 B0) be
+# graded WITHOUT clobbering the CANN 8.5.0 build tree that every P0..P10-PhaseA
+# number was measured with.  A cmake cache remembers its toolkit path, so one
+# build/ cannot serve two CANNs.
+BUILD_DIR="${BUILD_DIR:-build}"
+mkdir -p "${BUILD_DIR}"
+cd "${BUILD_DIR}"
 if [ ! -f Makefile ]; then
     cmake .. -DCMAKE_BUILD_TYPE=Release
 fi
 
 if [ -n "${TARGET}" ]; then
-    make -j"$(nproc)" "${TARGET}_test"
+    make -j"${JOBS:-$(nproc)}" "${TARGET}_test"
 else
-    make -j"$(nproc)"
+    make -j"${JOBS:-$(nproc)}"
 fi
 
 echo

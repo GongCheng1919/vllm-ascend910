@@ -25,12 +25,37 @@ import torch
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+# Which build dir serves which interpreter.  The .so's ABI is tied to the torch it
+# was compiled against, so this MUST NOT be a guess: an ABI-mismatched library at
+# least fails loudly, but a merely STALE one loads fine and silently grades a
+# different kernel -- the same failure shape as `.inc` edits not triggering a
+# rebuild (P6.5 D4).  `W4A8_OPS_LIB` overrides everything.
+_BUILD_BY_TORCH = {
+    "2.10": "build-023",   # .venv-023: vllm 0.23.0, torch_npu 2.10, CANN 9.1.0 (P10 Phase B)
+    "2.8": "build-venv",   # .venv:     vllm 0.13.0, torch_npu 2.8,  CANN 8.5.0
+}
+
+
 def _lib_path() -> str:
-    venv = os.path.join(_HERE, "..", "build-venv", "libvllm_w4a8_npu_ops.so")
-    plain = os.path.join(_HERE, "..", "build", "libvllm_w4a8_npu_ops.so")
-    in_venv = "/.venv/" in os.path.abspath(sys.executable) or torch.__version__.startswith("2.8")
-    first, second = (venv, plain) if in_venv else (plain, venv)
-    return os.path.normpath(first if os.path.exists(first) else second)
+    override = os.environ.get("W4A8_OPS_LIB")
+    if override:
+        return os.path.normpath(override)
+
+    SO = "libvllm_w4a8_npu_ops.so"
+    mm = ".".join(torch.__version__.split(".")[:2])
+    order = [_BUILD_BY_TORCH[mm]] if mm in _BUILD_BY_TORCH else []
+    order += [d for d in ("build-023", "build-venv", "build") if d not in order]
+
+    tried = []
+    for d in order:
+        cand = os.path.normpath(os.path.join(_HERE, "..", d, SO))
+        tried.append(cand)
+        if os.path.exists(cand):
+            return cand
+    raise FileNotFoundError(
+        f"no {SO} for torch {torch.__version__}; build one with "
+        f"`PYTHON=$(which python) BUILD_DIR=<dir> bash npu_ops/build.sh`, or point "
+        f"W4A8_OPS_LIB at it. Tried: " + ", ".join(tried))
 
 GROUP = 1024
 
@@ -123,6 +148,36 @@ def pack_int4(v: torch.Tensor) -> torch.Tensor:
     return packed.view(torch.int8) if packed.dtype == torch.uint8 else packed
 
 
+# ---------------------------------------------------------------------------
+# Ragged-K group geometry.  MUST agree with npu_ops/kernel/mg_kgeom.h, which the
+# kernel, the C++ host and the CPU reference all read.  It is not shared code, so
+# the C++ host asserts the row length it receives equals K_PAD_ELEMS//2 -- a
+# python/C++ drift therefore fails loudly on the first call instead of producing
+# a plausible-looking wrong answer.
+CUBE_K_ELEMS = 64          # int4 C0 = 32 B = 64 elements: the op's own alignment
+
+
+def _ceil_div(a: int, b: int) -> int:
+    return -(-a // b)
+
+
+def num_groups(K: int, gk: int = GROUP) -> int:
+    return _ceil_div(K, gk)
+
+
+def group_real(g: int, K: int, gk: int = GROUP) -> int:
+    """Elements actually in group g; only the last one can be short."""
+    return gk if g + 1 < num_groups(K, gk) else K - (num_groups(K, gk) - 1) * gk
+
+
+def k_pad_elems(K: int, gk: int = GROUP) -> int:
+    """Padded row length: each group rounded up to a whole int4 fractal."""
+    g = num_groups(K, gk)
+    stride = _ceil_div(gk, CUBE_K_ELEMS) * CUBE_K_ELEMS
+    last = _ceil_div(group_real(g - 1, K, gk), CUBE_K_ELEMS) * CUBE_K_ELEMS
+    return (g - 1) * stride + last
+
+
 def quantize_weight(w: torch.Tensor, group: int = GROUP
                     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """bf16 [N,K] -> (w_q packed int4, w_scale, w_ksum, w_zero) in kernel layout.
@@ -134,20 +189,54 @@ def quantize_weight(w: torch.Tensor, group: int = GROUP
     it exists for the MSD `+8` bias, not for asymmetry.  The zero point enters
     through the separate `w_zero * a_ksum` term.  Mixing the two costs SNR
     without raising an error, so it is asserted at the seam instead.
+
+    RAGGED K.  K need not be a multiple of `group`.  The final group is quantised
+    on its REAL members and then zero-padded up to an int4 fractal in the packed
+    layout (`k_pad_elems`).  The tail is quantised as its own single group rather
+    than by padding the weight first: for an ASYMMETRIC spec, appending zeros
+    changes (max - min), so padding before quantising would move the scale and the
+    zero point of the REAL elements -- silently, and only for the last group.
     """
     q = _fakequant_lab()
-    spec = q.QuantSpec(4, group, "W", sym=False)
-    qt = q.quantize(w.float(), spec)
-    assert qt.zero is not None, "asymmetric spec produced no zero point"
-
     N, K = w.shape
-    G = K // group
-    codes = qt.q.to(torch.int8).reshape(N, K)
-    w_q = pack_int4(codes.cpu()).reshape(N, K // 2)
-    # group-major [G, N]
-    w_scale = qt.scale.to(torch.bfloat16).T.contiguous()
-    w_zero = qt.zero.to(torch.bfloat16).T.contiguous()
-    w_ksum = codes.cpu().reshape(N, G, group).sum(dim=-1).to(torch.int32).T.contiguous()
+    G = num_groups(K, group)
+    k_full = (G - 1) * group
+    tail = K - k_full
+
+    parts_q, parts_s, parts_z = [], [], []
+    if k_full:
+        spec = q.QuantSpec(4, group, "W", sym=False)
+        qt = q.quantize(w[:, :k_full].float(), spec)
+        assert qt.zero is not None, "asymmetric spec produced no zero point"
+        parts_q.append(qt.q.to(torch.int8).reshape(N, k_full))
+        parts_s.append(qt.scale)
+        parts_z.append(qt.zero)
+    # The tail: ONE group whose width is exactly what is left.
+    qt_t = q.quantize(w[:, k_full:].float(), q.QuantSpec(4, tail, "W", sym=False))
+    assert qt_t.zero is not None, "asymmetric spec produced no zero point"
+    parts_q.append(qt_t.q.to(torch.int8).reshape(N, tail))
+    parts_s.append(qt_t.scale)
+    parts_z.append(qt_t.zero)
+
+    codes = torch.cat(parts_q, dim=1).cpu()               # [N, K], real elements
+    w_scale = torch.cat(parts_s, dim=1).to(torch.bfloat16).T.contiguous()   # [G, N]
+    w_zero = torch.cat(parts_z, dim=1).to(torch.bfloat16).T.contiguous()    # [G, N]
+
+    # w_ksum over each group's REAL members (the pad is zero, so this equals the
+    # sum over the padded span -- see kernel/mg_kgeom.h).
+    ksum = torch.stack([codes[:, g * group:g * group + group_real(g, K, group)]
+                        .to(torch.int32).sum(dim=1) for g in range(G)], dim=1)
+    w_ksum = ksum.to(torch.int32).T.contiguous()          # [G, N]
+
+    # Pack into the grouped PADDED layout: group g at element offset
+    # g * ceil(group/64), its tail zero.
+    kpad = k_pad_elems(K, group)
+    stride = _ceil_div(group, CUBE_K_ELEMS) * CUBE_K_ELEMS
+    padded = codes.new_zeros((N, kpad))
+    for g in range(G):
+        real = group_real(g, K, group)
+        padded[:, g * stride:g * stride + real] = codes[:, g * group:g * group + real]
+    w_q = pack_int4(padded).reshape(N, kpad // 2)
     return w_q, w_scale, w_ksum, w_zero
 
 

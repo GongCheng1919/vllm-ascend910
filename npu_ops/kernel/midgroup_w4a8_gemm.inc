@@ -2,15 +2,22 @@
 //
 // The including .cpp must define, before the include:
 //   TILE_M_CFG   output rows per tile (16 / 32 / 64 / 128)
-//   GK_CFG       quantisation group size along K, in ELEMENTS (256 / 512 / 1024)
+//   GK_CFG       quantisation group size along K, in ELEMENTS
 //   KERNEL_NAME  the extern "C" __global__ symbol to emit
 //   ASYM_CFG     1 = asymmetric weight (per-group zero point).  Default 0.
 //
-// Contract (G = K / GK groups; scales are GROUP-MAJOR):
-//   a_hi:    [M, K/2] int4 packed   -- high nibbles of the int8 activation
-//   a_lo:    [M, K/2] int4 packed   -- low nibbles, biased by -8
+// K IS ARBITRARY.  G = ceil(K / GK) and the final group may hold anything from
+// 1 to GK elements.  The packed tensors are in the grouped PADDED layout defined
+// by mg_kgeom.h -- each group zero-filled up to a whole int4 fractal (64
+// elements) -- so their row length is Kpad/2, not K/2, and a padded slot is a
+// hard zero in both operands.  See mg_kgeom.h for why that makes the arithmetic
+// exact rather than approximate; host/test_ragged_layout.cpp proves it in int32.
+//
+// Contract (G = ceil(K / GK) groups; scales are GROUP-MAJOR):
+//   a_hi:    [M, Kpad/2] int4 packed -- high nibbles of the int8 activation
+//   a_lo:    [M, Kpad/2] int4 packed -- low nibbles, biased by -8
 //   a_scale: [G, M] bf16            -- per (group, token)
-//   w_q:     [N, K/2] int4 packed, row-major; computes A @ W.T
+//   w_q:     [N, Kpad/2] int4 packed, row-major; computes A @ W.T
 //   w_scale: [G, N] bf16            -- per (group, channel)
 //   w_ksum:  [G, N] int32           -- sum_{k in g} W[n,k], the MSD bias correction
 //   w_zero:  [G, N] bf16            -- weight zero point, CODE units (asym only)
@@ -121,9 +128,17 @@ namespace {
 // P5 D9: L2-banded tile traversal.  0 = flat (m-outer, n-inner), the historical
 // order.  1 = band N so a band's weight slice stays L2-resident across the
 // M-sweep.  Pure scheduling change: same tiles, same math, bit-exact.
+// (P7 2026-08-19: default 1 blocked by a separate N=7168 numerical regression
+// in the ragged-K work, not by banding itself -- see pan-tracker.  Stays 0.)
 #ifndef BAND_N_CFG
 #define BAND_N_CFG 0
 #endif
+
+// The ragged-K group geometry, shared verbatim with the packer and the CPU
+// reference.  ONE definition: if the AIC and the AIV disagreed about G they would
+// DEADLOCK on the CrossCore flags rather than return a wrong number.
+#define MG_KGEOM_FN __aicore__ inline constexpr
+#include "mg_kgeom.h"
 
 constexpr bool     kAsym   = (ASYM_CFG != 0);
 constexpr uint32_t TILE_M  = TILE_M_CFG;
@@ -139,15 +154,23 @@ constexpr uint32_t CHUNKS_PER_AIV = HALF_M / CHUNK_M;
 static_assert(TILE_M >= 16 && (TILE_M % 16) == 0, "TILE_M must be a multiple of 16");
 static_assert((HALF_M % 8) == 0, "TILE_M/2 must be a multiple of 8 (Brcb repeat)");
 static_assert(CHUNKS_PER_AIV <= 2, "AIV pipeline is written for at most 2 chunks");
-static_assert(GK == 256 || GK == 512 || GK == 1024, "GK must be 256 / 512 / 1024");
 
 // ---- K geometry, in BYTES (int4: 2 elements per byte) ----
-// The L0 slice must divide the quant group, and A holds 2*TILE_M rows so the
-// slice depth also has to keep the depth-2 L0A ping-pong inside 64 KB.
+// The L0 slice must divide the quant group's PADDED span, and A holds 2*TILE_M
+// rows so the slice depth also has to keep the depth-2 L0A ping-pong inside
+// 64 KB.  Padding the group to a fractal first is what keeps INNER_KB a whole
+// number of C0 blocks for ANY GK (a raw GK/2 of, say, 48 B would not be).
+constexpr uint32_t kCubeK           = mgk::kCubeKElemsInt4;      // 64 elements
+constexpr uint32_t QGROUP_PAD_ELEMS = mgk::GroupStrideElems(GK, kCubeK);
+constexpr uint32_t QGROUP_PAD_KB    = QGROUP_PAD_ELEMS / 2;      // multiple of 32
 constexpr uint32_t kSliceCap = (TILE_M <= 64) ? 256 : 128;
-constexpr uint32_t INNER_KB  = (kSliceCap < GK / 2) ? kSliceCap : GK / 2;
+constexpr uint32_t INNER_KB  = (kSliceCap < QGROUP_PAD_KB) ? kSliceCap : QGROUP_PAD_KB;
 constexpr uint32_t INNER_K   = INNER_KB * 2;
-constexpr uint32_t SLICES_PER_QGROUP = GK / INNER_K;
+constexpr uint32_t SLICES_PER_QGROUP = mgk::SlicesInGroup(QGROUP_PAD_KB, INNER_KB);
+// Bytes of a FULL group's final slice.  Equals INNER_KB (i.e. no short slice
+// inside a full group) whenever GK is a multiple of 64 -- the shipping regime.
+constexpr uint32_t QG_LAST_SLICE_KB  = mgk::LastSliceBytes(QGROUP_PAD_KB, INNER_KB);
+static_assert(INNER_KB % 32 == 0, "the L0 slice must be a whole number of C0 blocks");
 
 // The L1 slab holds a whole number of quant groups, sized back up to the same
 // GM->L1 granularity the per-channel kernel used (so DMA efficiency is
@@ -160,12 +183,20 @@ constexpr uint32_t SLICES_PER_QGROUP = GK / INNER_K;
 #endif
 constexpr uint32_t kTargetGroupKB  = TARGET_GROUP_KB_CFG ? (uint32_t)TARGET_GROUP_KB_CFG
                                                          : ((TILE_M <= 64) ? 1024 : 512);
-constexpr uint32_t QGROUP_KB       = SLICES_PER_QGROUP * INNER_KB;
-constexpr uint32_t QGROUPS_PER_L1  = (kTargetGroupKB / QGROUP_KB) ? (kTargetGroupKB / QGROUP_KB) : 1;
+// An L1 slab holds a whole number of quant groups, so a flush point never falls
+// inside one.  A slab is pinned to ONE group when GK is not a multiple of 64,
+// because then every group ends on a SHORT slice and packing several per slab
+// would shift the following group off the uniform L1 slice stride.  (With GK
+// aligned -- the shipping regime -- full groups end on a full slice, so this
+// condition is inert and the constants below are bit-identical to the pre-ragged
+// build.)
+constexpr uint32_t QGROUPS_PER_L1  =
+    ((GK % kCubeK) != 0)                     ? 1u
+    : ((kTargetGroupKB / QGROUP_PAD_KB) ? (kTargetGroupKB / QGROUP_PAD_KB) : 1u);
 constexpr uint32_t SLICES_PER_GROUP = QGROUPS_PER_L1 * SLICES_PER_QGROUP;
-constexpr uint32_t GROUP_KB        = SLICES_PER_GROUP * INNER_KB;
-
-static_assert(GK % INNER_K == 0, "GK must be a multiple of the L0 slice");
+// The slab's BYTE span -- not slices*INNER_KB, which would over-count when the
+// group's last slice is short.
+constexpr uint32_t GROUP_KB        = QGROUPS_PER_L1 * QGROUP_PAD_KB;
 
 constexpr uint32_t kBlock        = 16;
 constexpr uint32_t kK0B          = 32;                   // C0 in bytes
@@ -208,7 +239,8 @@ constexpr uint32_t kL0CDepth     = (2 * kL0CTileBytes <= 128 * 1024) ? 2 : 1;
 // Byte offset of the lo plane inside one L0A slice tile.  LoadSliceL1ToL0 lays
 // the kMBlocks 16-row fractal blocks out back to back, so plane boundaries are
 // block boundaries and the lo plane is a valid standalone Mmad operand.
-constexpr uint32_t kLoPlaneL0AOff = TILE_M * INNER_KB;
+// (The lo plane's L0A offset is TILE_M * the SLICE's byte width, computed at the
+// Mmad because a ragged slice makes it a runtime value.)
 
 static_assert(2 * TILE_MC * INNER_KB <= 64 * 1024, "L0A over budget");
 static_assert(2 * TILE_N  * INNER_KB <= 64 * 1024, "L0B over budget");
@@ -280,10 +312,15 @@ __aicore__ inline void LoadSliceL1ToL0(const LocalTensor<int8_t>& aL0,
                                        const LocalTensor<int8_t>& aL1,
                                        const LocalTensor<int8_t>& bL1,
                                        const LoadData2dParams& ldA,
-                                       const LoadData2dParams& ldB)
+                                       const LoadData2dParams& ldB,
+                                       uint32_t kBlocks = kKBlocksInner)
 {
+    // `kBlocks` is the slice's C0-block count -- kKBlocksInner for every slice
+    // except a group's last one under ragged K, where it is smaller.  It sets
+    // both ldA/ldB.repeatTimes (done by the caller) and the L0A row-block pitch,
+    // which must agree or the planes would overlap.
     for (uint32_t mi = 0; mi < kMBlocks; mi++) {
-        LoadData(aL0[mi * kKBlocksInner * kNzBlockSize].ReinterpretCast<int4b_t>(),
+        LoadData(aL0[mi * kBlocks * kNzBlockSize].ReinterpretCast<int4b_t>(),
                  aL1[mi * kNzBlockSize].ReinterpretCast<int4b_t>(), ldA);
     }
     LoadData(bL0.ReinterpretCast<int4b_t>(), bL1.ReinterpretCast<int4b_t>(), ldB);
@@ -304,13 +341,33 @@ __aicore__ inline void LoadPlaneSliceL1ToL0(const LocalTensor<int8_t>& aL0,
                                             const LocalTensor<int8_t>& bL1,
                                             const LoadData2dParams& ldA,
                                             const LoadData2dParams& ldB,
-                                            uint32_t rowBlkOff)
+                                            uint32_t rowBlkOff,
+                                            uint32_t kBlocks = kKBlocksInner)
 {
     for (uint32_t mi = 0; mi < kMBlocksPlane; mi++) {
-        LoadData(aL0[mi * kKBlocksInner * kNzBlockSize].ReinterpretCast<int4b_t>(),
+        LoadData(aL0[mi * kBlocks * kNzBlockSize].ReinterpretCast<int4b_t>(),
                  aL1[(rowBlkOff + mi) * kNzBlockSize].ReinterpretCast<int4b_t>(), ldA);
     }
     LoadData(bL0.ReinterpretCast<int4b_t>(), bL1.ReinterpretCast<int4b_t>(), ldB);
+}
+
+// ---- ragged-slice helpers ----------------------------------------------
+// Byte width of slab-local slice `s`.  Only a slab's LAST slice can be short:
+// with GK a multiple of 64 a full group ends on a full slice, and when it is not
+// QGROUPS_PER_L1 is pinned to 1 so a slab is exactly one group.  Free functions
+// rather than lambdas because a lambda in a kernel defaults to [host] and CCE
+// refuses to call it from [aicore] code.
+__aicore__ inline uint32_t SliceKB(uint32_t s, uint32_t slices, uint32_t slabLastSliceKB)
+{
+    return (s + 1 == slices) ? slabLastSliceKB : INNER_KB;
+}
+
+// Point the two LoadData2D descriptors at a slice `kBlocks` C0 blocks deep.
+__aicore__ inline void SetSliceLoadGeom(LoadData2dParams& ldA, LoadData2dParams& ldB,
+                                        uint32_t kBlocks)
+{
+    ldA.repeatTimes = static_cast<uint8_t>(kBlocks);
+    ldB.repeatTimes = static_cast<uint8_t>(kNBlocks * kBlocks);
 }
 
 // ---- L2-banded tile traversal (P5 D9) ----------------------------------
@@ -352,9 +409,12 @@ __aicore__ inline void IssueGroupLoad(A1Q& a1Queue, B1Q& b1Queue,
                                       const GlobalTensor<int8_t>& bGm,
                                       Nd2NzParams& ndA, Nd2NzParams& ndB,
                                       uint64_t aBase, uint64_t bBase,
-                                      uint64_t gOffB, uint32_t slices)
+                                      uint64_t gOffB, uint32_t slabKB)
 {
-    const uint16_t dv = static_cast<uint16_t>(slices * INNER_KB);
+    // The slab's BYTE span, passed in rather than derived from a slice count:
+    // its final slice can be short (ragged K), and slices*INNER_KB would then
+    // read past the row and lay the NZ fractals out at the wrong offsets.
+    const uint16_t dv = static_cast<uint16_t>(slabKB);
     ndA.dValue = dv;
     ndB.dValue = dv;
     auto aL1 = a1Queue.template AllocTensor<int8_t>();
@@ -443,12 +503,23 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
     const uint32_t numNTiles = N / TILE_N;
     const uint32_t numTiles  = (M / TILE_M) * numNTiles;
 
-    const uint32_t Kb          = K / 2;                     // bytes per row (int4)
-    const uint32_t numSlices   = Kb / INNER_KB;
-    const uint32_t numQGroups  = K / GK;
-    const uint32_t numG        = (numSlices + SLICES_PER_GROUP - 1) / SLICES_PER_GROUP;
-    const uint32_t lastGSlices = numSlices - (numG - 1) * SLICES_PER_GROUP;
-    const uint32_t g0Slices    = (numG == 1) ? lastGSlices : SLICES_PER_GROUP;
+    // ---- ragged-K geometry (mg_kgeom.h) ----------------------------------
+    // K is arbitrary; the packed rows are Kpad/2 bytes long and the FINAL quant
+    // group may be short.  Everything here is derived from (K, GK) alone, by the
+    // same functions the packer used, so no extra tensor or argument is needed.
+    const uint32_t numQGroups  = mgk::NumGroups(K, GK);
+    const uint32_t Kb          = mgk::KPadElems(K, GK, kCubeK) / 2;   // PADDED row pitch
+    // The final group's padded span, its slice count, and its last slice's width.
+    const uint32_t qgLastKB    = mgk::GroupPadElems(numQGroups - 1, K, GK, kCubeK) / 2;
+    const uint32_t spqLast     = mgk::SlicesInGroup(qgLastKB, INNER_KB);
+    const uint32_t lastQGSliceKB = mgk::LastSliceBytes(qgLastKB, INNER_KB);
+    // L1 slabs.  A slab holds QGROUPS_PER_L1 groups (the last one fewer), so a
+    // group never straddles a slab and every slab boundary is a flush boundary.
+    const uint32_t numG        = mgk::CeilDiv(numQGroups, QGROUPS_PER_L1);
+    const uint32_t lastSlabQGs = numQGroups - (numG - 1) * QGROUPS_PER_L1;
+    const uint32_t lastSlabKB  = (lastSlabQGs - 1) * QGROUP_PAD_KB + qgLastKB;
+    const uint32_t lastGSlices = (lastSlabQGs - 1) * SLICES_PER_QGROUP + spqLast;
+    const uint32_t g0KB        = (numG == 1) ? lastSlabKB : GROUP_KB;
 
     // L2 banding params -- computed identically on AIC and AIV so both engines
     // map a tileId to the same (m, n).  superN == numNTiles degenerates to the
@@ -565,7 +636,7 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
 
             if (!tileG0Prefetched) {
                 IssueGroupLoad(a1Queue, b1Queue, aHiGm, aLoGm, bGm, ndA, ndB,
-                               aTileBase, bTileBase, 0, g0Slices);
+                               aTileBase, bTileBase, 0, g0KB);
             }
             tileG0Prefetched = false;
 
@@ -574,25 +645,37 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
 
             for (uint32_t g = 0; g < numG; g++) {
                 const uint32_t slices = (g + 1 == numG) ? lastGSlices : SLICES_PER_GROUP;
+                // Under ragged K exactly ONE slice per slab can be short: the
+                // slab's last.  (Full groups end on a full slice when GK is a
+                // multiple of 64; when it is not, QGROUPS_PER_L1 is pinned to 1 so
+                // a slab IS a group.)  That is what lets the flush cadence below
+                // stay a counter comparison instead of a group-index lookup.
+                const uint32_t slabLastSliceKB =
+                    (g + 1 == numG) ? lastQGSliceKB : QG_LAST_SLICE_KB;
+                // Quant groups in THIS slab = flushes this slab owes the AIV.
+                const uint32_t slabQGs = (g + 1 == numG) ? lastSlabQGs : QGROUPS_PER_L1;
 
                 if (g + 1 < numG) {
-                    const uint32_t nextSlices =
-                        (g + 2 == numG) ? lastGSlices : SLICES_PER_GROUP;
+                    const uint32_t nextKB =
+                        (g + 2 == numG) ? lastSlabKB : GROUP_KB;
                     IssueGroupLoad(a1Queue, b1Queue, aHiGm, aLoGm, bGm, ndA, ndB,
                                    aTileBase, bTileBase,
-                                   (uint64_t)(g + 1) * GROUP_KB, nextSlices);
+                                   (uint64_t)(g + 1) * GROUP_KB, nextKB);
                 }
 
                 auto aL1 = a1Queue.DeQue<int8_t>();
                 auto bL1 = b1Queue.DeQue<int8_t>();
 
 #if ABLATE_AIC_CFG >= 2
-                // DMA-only.  Flushes for THIS L1 slab come from its slice count,
-                // not from QGROUPS_PER_L1 -- the last slab is short (K=5120 is
-                // 5 groups over 3 slabs), and over-signalling would hang the AIV.
+                // DMA-only.  Flushes for THIS L1 slab are its GROUP count, which
+                // is not slices/SLICES_PER_QGROUP once K is ragged: a short final
+                // group has fewer slices than a full one, so that division would
+                // under-signal by one and HANG the AIV (K=1280 -> 3 slices, 2
+                // groups, 3/2 = 1).  The last slab is also short in group count
+                // (K=5120 is 5 groups over 3 slabs), which slabQGs covers.
                 a1Queue.FreeTensor(aL1);
                 b1Queue.FreeTensor(bL1);
-                for (uint32_t q = 0; q < slices / SLICES_PER_QGROUP; q++) {
+                for (uint32_t q = 0; q < slabQGs; q++) {
                     const uint32_t slot = flushIdx & 1u;
                     if (flushIdx >= 2) {
                         if (slot == 0) CrossCoreWaitFlag(kAivToAicFlag0);
@@ -613,24 +696,33 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
                 // already reads (rowOffHi / rowOffLo), so the AIV is untouched
                 // and the slot's bytes are identical to the stacked build.
                 const uint32_t slot = flushIdx & 1u;
+                // Same ragged-slice rule as the stacked path below: only the
+                // slab's last slice can be short.  QGROUPS_PER_L1 == 1 here
+                // (static_assert), so this slab is exactly one quant group.
                 for (uint32_t plane = 0; plane < 2; plane++) {
                     const uint32_t rowBlkOff = plane * kMBlocksPlane;
                     {
+                        const uint32_t kb0 = SliceKB(0, slices, slabLastSliceKB) / kK0B;
+                        SetSliceLoadGeom(ldA, ldB, kb0);
                         auto aL0p = a2Queue.AllocTensor<int8_t>();
                         auto bL0p = b2Queue.AllocTensor<int8_t>();
-                        LoadPlaneSliceL1ToL0(aL0p, bL0p, aL1, bL1, ldA, ldB, rowBlkOff);
+                        LoadPlaneSliceL1ToL0(aL0p, bL0p, aL1, bL1, ldA, ldB, rowBlkOff,
+                                             kb0);
                         a2Queue.EnQue(aL0p);
                         b2Queue.EnQue(bL0p);
                     }
                     auto cAcc = c1Queue.AllocTensor<int32_t>();
                     for (uint32_t s = 0; s < slices; s++) {
                         if (s + 1 < slices) {
+                            const uint32_t kbN =
+                                SliceKB(s + 1, slices, slabLastSliceKB) / kK0B;
+                            SetSliceLoadGeom(ldA, ldB, kbN);
                             auto aL0n = a2Queue.AllocTensor<int8_t>();
                             auto bL0n = b2Queue.AllocTensor<int8_t>();
                             LoadPlaneSliceL1ToL0(aL0n, bL0n,
                                                  aL1[(s + 1) * kSliceStrideA],
                                                  bL1[(s + 1) * kSliceStrideB],
-                                                 ldA, ldB, rowBlkOff);
+                                                 ldA, ldB, rowBlkOff, kbN);
                             a2Queue.EnQue(aL0n);
                             b2Queue.EnQue(bL0n);
                         }
@@ -645,6 +737,7 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
                             b1Queue.FreeTensor(bL1);
                         }
 
+                        mm.k = SliceKB(s, slices, slabLastSliceKB) * 2;
                         mm.cmatrixInitVal = (s == 0);
                         Mmad(cAcc, aL0.ReinterpretCast<int4b_t>(),
                              bL0.ReinterpretCast<int4b_t>(), mm);
@@ -672,21 +765,28 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
                 else           CrossCoreSetFlag<kCrossMode, PIPE_FIX>(kAicToAivFlag1);
                 flushIdx++;
                 } else {
+                // ldA/ldB/mm.k are pointed at each slice's own width.  All three
+                // are runtime struct fields already; only their VALUES used to be
+                // compile-time constants.
                 {
+                    const uint32_t kb0 = SliceKB(0, slices, slabLastSliceKB) / kK0B;
+                    SetSliceLoadGeom(ldA, ldB, kb0);
                     auto aL0p = a2Queue.AllocTensor<int8_t>();
                     auto bL0p = b2Queue.AllocTensor<int8_t>();
-                    LoadSliceL1ToL0(aL0p, bL0p, aL1, bL1, ldA, ldB);
+                    LoadSliceL1ToL0(aL0p, bL0p, aL1, bL1, ldA, ldB, kb0);
                     a2Queue.EnQue(aL0p);
                     b2Queue.EnQue(bL0p);
                 }
 
                 for (uint32_t s = 0; s < slices; s++) {
                     if (s + 1 < slices) {
+                        const uint32_t kbN = SliceKB(s + 1, slices, slabLastSliceKB) / kK0B;
+                        SetSliceLoadGeom(ldA, ldB, kbN);
                         auto aL0n = a2Queue.AllocTensor<int8_t>();
                         auto bL0n = b2Queue.AllocTensor<int8_t>();
                         LoadSliceL1ToL0(aL0n, bL0n,
                                         aL1[(s + 1) * kSliceStrideA],
-                                        bL1[(s + 1) * kSliceStrideB], ldA, ldB);
+                                        bL1[(s + 1) * kSliceStrideB], ldA, ldB, kbN);
                         a2Queue.EnQue(aL0n);
                         b2Queue.EnQue(bL0n);
                     }
@@ -705,20 +805,30 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
                             cL0Lo = c1Queue.AllocTensor<int32_t>();
                         }
                     }
+                    const uint32_t sKB = SliceKB(s, slices, slabLastSliceKB);
+                    mm.k = sKB * 2;                 // elements; a whole C0 multiple
                     mm.cmatrixInitVal = (sInQ == 0);
                     Mmad(cL0, aL0.ReinterpretCast<int4b_t>(),
                          bL0.ReinterpretCast<int4b_t>(), mm);
                     if constexpr (kSplitFlush) {
                         // Same B slice, the other half of the same A slice: no
-                        // extra L1->L0 traffic, only a second Mmad issue.
-                        Mmad(cL0Lo, aL0[kLoPlaneL0AOff].ReinterpretCast<int4b_t>(),
+                        // extra L1->L0 traffic, only a second Mmad issue.  The lo
+                        // plane's offset tracks the SLICE width, not INNER_KB, or a
+                        // short slice would read past the hi plane into stale L0A.
+                        Mmad(cL0Lo, aL0[TILE_M * sKB].ReinterpretCast<int4b_t>(),
                              bL0.ReinterpretCast<int4b_t>(), mm);
                     }
 
                     a2Queue.FreeTensor(aL0);
                     b2Queue.FreeTensor(bL0);
 
-                    if (++sInQ == SLICES_PER_QGROUP) {
+                    ++sInQ;
+                    // A quant group ends after SLICES_PER_QGROUP slices OR at the
+                    // end of the slab -- a slab boundary is always a group
+                    // boundary, and under ragged K the final group reaches it
+                    // early.  This one comparison is the whole of the short-group
+                    // handling: no group index has to be tracked.
+                    if (sInQ == SLICES_PER_QGROUP || s + 1 == slices) {
                         sInQ = 0;
                         c1Queue.EnQue(cL0);
                         auto cOut = c1Queue.DeQue<int32_t>();
@@ -767,7 +877,7 @@ void KERNEL_NAME(GM_ADDR a_hi, GM_ADDR a_lo, GM_ADDR a_scale,
                          nextMTile, nextNTile);
                 IssueGroupLoad(a1Queue, b1Queue, aHiGm, aLoGm, bGm, ndA, ndB,
                                (uint64_t)nextMTile * TILE_M * Kb,
-                               (uint64_t)nextNTile * TILE_N * Kb, 0, g0Slices);
+                               (uint64_t)nextNTile * TILE_N * Kb, 0, g0KB);
                 tileG0Prefetched = true;
             }
         }

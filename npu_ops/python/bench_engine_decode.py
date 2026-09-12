@@ -50,6 +50,12 @@ ARMS = {
     "w4a8-native": ("models/QwQ-32B-W4A8-Random", "ascend", None),
     "w8a8":        ("models/QwQ-32B",             None,     "w8a8"),
     "w4a8":        ("models/QwQ-32B",             None,     "w4a8"),
+    # Loads an ALREADY-INT4 checkpoint (export_w4a8_checkpoint.py) through our own
+    # QuantizationConfig, so vLLM allocates int4-shaped parameters during model
+    # construction.  Same kernels and bitwise-identical weights as "w4a8"
+    # (test_w4a8_ckpt_seam.py), but peak memory is the int4 footprint instead of
+    # the BF16 one -- which is what makes single-card 64 layers possible at all.
+    "w4a8-ckpt":   ("models/QwQ-32B-W4A8-MG", "midgroup_w4a8", None),
 }
 
 # vLLM v1 runs EngineCore in a child process by default; the in-process engine is
@@ -79,9 +85,13 @@ def _rank_conversion_stats(worker) -> dict:
         st = vllm_engine_patch.stats()
     except Exception as e:                            # noqa: BLE001
         return {"pid": os.getpid(), "arm": f"IMPORT FAILED: {e!r}",
-                "converted": 0, "skipped": 0}
+                "converted": 0, "skipped": 0, "skipped_names": []}
+    # The NAMES travel, not just the count: the gate that reads this has to
+    # classify every skip against the declared policy, and a count cannot be
+    # classified (P10 D10).
     return {"pid": os.getpid(), "arm": st.get("arm", "<unpatched>"),
-            "converted": st.get("converted", 0), "skipped": st.get("skipped", 0)}
+            "converted": st.get("converted", 0), "skipped": st.get("skipped", 0),
+            "skipped_names": list(st.get("skipped_names", []))}
 
 
 def _quant_methods(model) -> dict:
@@ -100,6 +110,41 @@ def _quant_methods(model) -> dict:
         if isinstance(m, LinearBase):
             c[type(getattr(m, "quant_method", None)).__name__] += 1
     return dict(c)
+
+
+def _audit_skips(names, policy: str, arm: str, who: str) -> bool:
+    """Classify every skipped layer against the DECLARED expected-skip set.
+
+    Returns True only if the set of skips is exactly what the caller said it
+    would be.  The count is never enough on its own: `skipped=39` on Qwen3.8 is
+    the by-design set, and `skipped=39` with one vision layer swapped for a
+    `down_proj` is a coverage hole that would report a partly-BF16 model under
+    the arm's name.  Same integer, opposite conclusions (P10 D10).
+    """
+    import vllm_engine_patch
+    try:
+        tally, unexpected = vllm_engine_patch.classify_skips(names, policy)
+    except KeyError as e:                                  # noqa: BLE001
+        print(f"[bench] ERROR: {e}")
+        return False
+    if unexpected:
+        print(f"[bench] ERROR: {who} skipped {len(unexpected)} linears that the "
+              f"expected-skip set `{policy}` does not cover -- they stayed BF16, "
+              f"so this is a MIXED arm, not {arm}")
+        for nm in unexpected:
+            print(f"[bench]   UNEXPECTED skip: {nm}")
+        return False
+    print(f"[bench] {who}: all {len(names)} skips are inside the declared set "
+          f"`{policy}`.  This run is `{arm} EXCEPT the following, which stay "
+          f"BF16` -- carry that clause with the number:")
+    for (a, b), got in tally.items():
+        reason = next(r for x, y, r in
+                      vllm_engine_patch.EXPECTED_SKIPS[policy]
+                      if (x, y) == (a, b))
+        ex = f"  e.g. {got[0]}" if got else ""
+        print(f"[bench]   {len(got):3d}x  *{a}*{b}*{ex}")
+        print(f"[bench]         why: {reason}")
+    return True
 
 
 def main() -> int:
@@ -143,12 +188,55 @@ def main() -> int:
     ap.add_argument("--eager", action="store_true",
                     help="disable ACL graph (host-bound; see P4 D7)")
     ap.add_argument("--gpu-util", type=float, default=0.85)
+    ap.add_argument("--max-num-seqs", type=int, default=0,
+                    help="cap concurrent sequences (0 = vLLM's default 256).  "
+                         "Load-bearing on Qwen3.8: 48 of its 64 layers are Gated "
+                         "DeltaNet and each running sequence needs one Mamba "
+                         "state block, so the weight footprint sets a HARD "
+                         "concurrency ceiling.  At 64 layers BF16 leaves room "
+                         "for only 41 blocks and the engine refuses to start "
+                         "with `max_num_seqs (256) exceeds available Mamba cache "
+                         "blocks (41)`.  Lowering this is how that arm produces "
+                         "a number at all -- and the ceiling itself is a result, "
+                         "so record it next to the throughput.")
     ap.add_argument("--allow-misaligned-tp", action="store_true",
                     help="Run a group-misaligned TP anyway, knowingly measuring "
                          "a mixed W4A8/BF16 model.")
+    ap.add_argument("--expect-skip", default="none",
+                    help="name of a declared expected-skip set in "
+                         "vllm_engine_patch.EXPECTED_SKIPS (`none` | `qwen38`). "
+                         "A skip leaves that linear in BF16, so by default ANY "
+                         "skip fails the run.  Qwen3.8 skips a fixed set BY "
+                         "DESIGN (vision `mlp.linear_fc1`, the GDN `in_proj_ba` "
+                         "gate, the GDN `conv1d`; P10 D5), and without this flag "
+                         "that arm can never produce a number.  This does NOT "
+                         "relax the gate to a count: every skipped layer must "
+                         "match a DECLARED pattern, one unclassified skip still "
+                         "fails, and the declaration is printed so the result "
+                         "reads `W4A8 except <these>` rather than `W4A8`.")
+    ap.add_argument("--real-weights", action="store_true",
+                    help="load the checkpoint for real instead of load_format=dummy. "
+                         "Every prior measurement used dummy; keep it off for "
+                         "comparability unless you are checking generation.")
+    ap.add_argument("--additional-config", default="",
+                    help="JSON passed straight to vLLM's `additional_config=`, "
+                         "which is where vllm-ascend keeps its own knobs.  Needed "
+                         "for `{\"ascend_compilation_config\": "
+                         "{\"enable_npugraph_ex\": false}}`: on 0.23.0 the "
+                         "vendor W4A8 path cannot be compiled by torch_npu's "
+                         "npugraph_ex backend (`'CompilerConfig' object has no "
+                         "attribute 'experimental_config'`), while bf16 and "
+                         "W8A8_DYNAMIC compile fine.")
     ap.add_argument("--out", default="")
     ap.add_argument("--profile-dir", default="",
                     help="capture a torch_npu profile of ONE timed generate")
+    ap.add_argument("--async-scheduling", action="store_true",
+                    help="overlap the scheduler / input-prep host work with the "
+                         "PREVIOUS step's forward.  P6.5 measured 4.05 ms of the "
+                         "10.8 ms step as pure device idle at L=16/batch=1, 91% of "
+                         "it in five discrete host stalls BEFORE the model graph "
+                         "(the biggest 1.9 ms, in front of an input-buffer Fill), "
+                         "so this is the matching fix.  Not supported with PP.")
     ap.add_argument("--cudagraph-mode", default="",
                     help="PIECEWISE (vllm-ascend default) | FULL_DECODE_ONLY | "
                          "FULL | FULL_AND_PIECEWISE.  PIECEWISE splits the graph "
@@ -163,23 +251,19 @@ def main() -> int:
     default_model, quantization, patch_arm = ARMS[args.arm]
     model = args.model or default_model
 
-    # Group-alignment gate.  See --tp help: a misaligned TP does not fail, it
-    # silently leaves o_proj/down_proj in BF16, so the arm stops being W4A8.
-    if patch_arm == "w4a8" and args.tp > 1 and not args.allow_misaligned_tp:
-        import json as _json
-        cfg = _json.load(open(os.path.join(model, "config.json")))
-        bad = [(nm, k) for nm, k in (("o_proj", cfg["hidden_size"]),
-                                     ("down_proj", cfg["intermediate_size"]))
-               if (k // args.tp) % 1024]
-        if bad:
-            print(f"[bench] REFUSING tp={args.tp}: " + ", ".join(
-                f"{nm} K={k} -> shard {k // args.tp} not a multiple of GK=1024"
-                for nm, k in bad))
-            print("[bench] those layers would silently stay BF16 (34% of the "
-                  "weights), so the result would not be a W4A8 number.")
-            print("[bench] use --pp instead, or GK=256, or "
-                  "--allow-misaligned-tp to measure the mixed arm on purpose.")
-            return 2
+    # The group-alignment gate that used to live here is GONE, because the
+    # constraint it enforced is gone: the op takes any K (npu_ops/kernel/mg_kgeom.h),
+    # so `K_rank = K/TP` no longer has to be a multiple of GK and o_proj/down_proj
+    # are converted at every TP.  It is NOT replaced by nothing -- the thing it was
+    # really protecting against (an arm that quietly converts only part of the
+    # model) is now caught for ALL FIVE arms, after the engine is up, by the
+    # per-rank `converted=/skipped=` query and the `quant_methods` census below.
+    # That is strictly stronger: it checks what actually happened instead of
+    # predicting it from config.json, and it covers the two native arms too, which
+    # this gate never could (P6 D8, D12).
+    if args.allow_misaligned_tp:
+        print("[bench] note: --allow-misaligned-tp is a no-op now; K alignment is "
+              "no longer a constraint.")
 
     multi_rank = args.tp * args.pp > 1
     if patch_arm:
@@ -200,8 +284,23 @@ def main() -> int:
         overrides["num_hidden_layers"] = args.layers
 
     kw = {}
+    if args.additional_config:
+        import json as _json
+        kw["additional_config"] = _json.loads(args.additional_config)
+    if args.max_num_seqs:
+        kw["max_num_seqs"] = args.max_num_seqs
+    if args.async_scheduling:
+        if args.pp > 1:
+            print("[bench] REFUSING: --async-scheduling is not supported with PP")
+            return 2
+        kw["async_scheduling"] = True
     if args.cudagraph_mode:
         kw["compilation_config"] = {"cudagraph_mode": args.cudagraph_mode}
+    if quantization == "midgroup_w4a8":
+        # Ours, not vllm-ascend's: registers the config class that config.json's
+        # `quantization_config.quant_method` names.  Must happen before LLM().
+        import midgroup_quant
+        midgroup_quant.register()
     if quantization:
         # Neither vendor config.json has a `quantization_config`; the method is
         # declared in quant_model_description.json and only reached by asking
@@ -213,7 +312,7 @@ def main() -> int:
         model=model,
         tensor_parallel_size=args.tp,
         pipeline_parallel_size=args.pp,
-        load_format="dummy",
+        load_format=("auto" if args.real_weights else "dummy"),
         hf_overrides=overrides or None,
         max_model_len=max(args.prompt_len) + args.out_len + 16,
         gpu_memory_utilization=args.gpu_util,
@@ -223,10 +322,21 @@ def main() -> int:
         **kw,
     )
     t_load = time.perf_counter() - t0
+    # What the ENGINE actually resolved, not what we asked for.  vllm 0.23.0
+    # turns async scheduling ON BY DEFAULT ("Asynchronous scheduling is enabled"
+    # in every arm's startup log), whereas P6.5 measured it as an opt-in worth
+    # 1.23-1.29x.  Writing our own flag into the CSV would label every row of
+    # this phase `async_sched=0` while the engine ran with it on -- the same
+    # class of error as trusting a log line for conversion coverage (P6 D8).
+    try:
+        _async = bool(llm.llm_engine.vllm_config.scheduler_config.async_scheduling)
+    except Exception:                                     # noqa: BLE001
+        _async = bool(args.async_scheduling)
     print(f"[bench] engine up in {t_load:.1f}s  arm={args.arm} model={model} "
           f"layers={args.layers or 64} tp={args.tp} pp={args.pp} "
           f"graph={'off' if args.eager else 'on'}"
-          f"{' mode=' + args.cudagraph_mode if args.cudagraph_mode else ''}")
+          f"{' mode=' + args.cudagraph_mode if args.cudagraph_mode else ''}"
+          f"{' async-sched' if args.async_scheduling else ''}")
 
     if patch_arm:
         st = vllm_engine_patch.stats()
@@ -251,9 +361,23 @@ def main() -> int:
                       "ranks' layers ran in BF16, so this is not a "
                       f"{patch_arm} number")
                 return 2
+            # `skipped` is now load-bearing for BOTH arms.  A skip leaves that
+            # linear in BF16, which is a PARTIAL arm reported under a whole arm's
+            # name -- the D0 failure that made every TP>1 W8A8 baseline a 66/34
+            # mixture.  Since K is unconstrained there is no legitimate reason to
+            # skip a QwQ-32B projection, so any skip is a bug, not a fallback.
+            for r, s in enumerate(per_rank):
+                if s["skipped"] and not _audit_skips(
+                        s["skipped_names"], args.expect_skip, patch_arm,
+                        f"rank {r}"):
+                    return 2
         elif not st.get("converted"):
             print("[bench] ERROR: nothing converted -- the arm is a BF16 run")
             return 2
+        elif st.get("skipped"):
+            if not _audit_skips(st.get("skipped_names", []), args.expect_skip,
+                                patch_arm, "rank 0"):
+                return 2
 
     # Works for every arm, including the two `-native` ones that our patch never
     # touches.  An arm whose linears all report UnquantizedLinearMethod is a
@@ -313,15 +437,21 @@ def main() -> int:
                 # `cudagraph_mode` is NOT optional bookkeeping: the same kernels
                 # measure 1.41x under the vllm-ascend default PIECEWISE and
                 # 2.78x under FULL_DECODE_ONLY.  A row without it is unreadable.
+                # `async_sched` is last so readers of the older CSVs keep
+                # working; it is not optional bookkeeping either -- it is worth
+                # 1.23-1.29x on its own (P6.5 D12), so a row without it cannot
+                # be compared against one with it.
                 f.write("arm,layers,tp,pp,graph,cudagraph_mode,batch,"
                         "prompt_len,out_len,total_s,gen_tok,step_us,"
-                        "per_layer_us,throughput_tok_s,prefill_ms\n")
+                        "per_layer_us,throughput_tok_s,prefill_ms,"
+                        "async_sched,expect_skip\n")
             mode = args.cudagraph_mode or "PIECEWISE(default)"
             for plen, b, dt, gen, ps, pl, pf in rows:
                 f.write(f"{args.arm},{n_layers},{args.tp},{args.pp},"
                         f"{'eager' if args.eager else 'aclgraph'},{mode},{b},"
                         f"{plen},{args.out_len},"
-                        f"{dt:.4f},{gen},{ps:.2f},{pl:.3f},{gen / dt:.2f},{pf}\n")
+                        f"{dt:.4f},{gen},{ps:.2f},{pl:.3f},{gen / dt:.2f},{pf},"
+                        f"{int(_async)},{args.expect_skip}\n")
         print(f"[bench] appended to {args.out}")
     return 0
 

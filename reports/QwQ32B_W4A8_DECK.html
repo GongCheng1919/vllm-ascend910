@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Mid-group W4A8 on Ascend 910B4 — QwQ-32B 推理加速</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#fff;color:#111;
+ font:17px/1.7 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",Arial,sans-serif;
+ -webkit-font-smoothing:antialiased;}
+.pg{max-width:1000px;margin:0 auto;padding:60px 44px 46px;min-height:100vh;
+ display:flex;flex-direction:column;border-bottom:1px solid #ececec;position:relative;}
+.pg:last-child{border-bottom:0}
+.tag{font-size:12px;letter-spacing:.16em;color:#999;text-transform:uppercase;margin-bottom:12px}
+.no{position:absolute;right:44px;bottom:20px;font-size:12px;color:#bbb;font-variant-numeric:tabular-nums}
+h1{font-size:36px;line-height:1.3;font-weight:700;letter-spacing:-.01em}
+h2{font-size:27px;line-height:1.3;font-weight:700;letter-spacing:-.01em}
+h3{font-size:17px;font-weight:700;margin:20px 0 6px}
+.lead{color:#555;font-size:16px;margin-top:10px;line-height:1.6}
+.bd{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;gap:14px;padding:22px 0}
+.bd.top{justify-content:flex-start}
+.two{display:flex;gap:36px}
+.two>*{flex:1;min-width:0}
+p{margin:8px 0}
+ul,ol{padding-left:22px}
+li{margin:9px 0;line-height:1.6}
+code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.88em;
+ background:#f4f4f4;padding:1px 5px;border-radius:2px}
+pre{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13.5px;line-height:1.65;
+ background:#fafafa;border:1px solid #ececec;padding:14px 18px;overflow-x:auto;white-space:pre}
+table{border-collapse:collapse;width:100%;font-size:15px}
+caption{caption-side:top;text-align:left;font-size:13px;color:#777;padding-bottom:6px}
+th{font-weight:700;text-align:left;padding:8px 12px;
+ border-top:1.6px solid #111;border-bottom:1px solid #111;white-space:nowrap}
+td{padding:7px 12px;border-bottom:1px solid #ececec}
+tr:last-child td{border-bottom:1.6px solid #111}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+.w{color:#0b6b39;font-weight:700} .l{color:#a11d2c;font-weight:700} .m{color:#999}
+.box{border-left:3px solid #111;padding:10px 0 10px 16px;font-size:16px;color:#222}
+.box.w{border-left-color:#0b6b39} .box.l{border-left-color:#a11d2c} .box.y{border-left-color:#b8860b}
+.box .h{font-weight:700;display:block;margin-bottom:3px}
+.note{font-size:13.5px;color:#888;line-height:1.55}
+.kv{display:flex;gap:30px;flex-wrap:wrap}
+.kv .i{flex:1;min-width:130px}
+.kv .i .v{font-size:40px;font-weight:700;line-height:1.05;font-variant-numeric:tabular-nums}
+.kv .i .t{font-size:13px;color:#777;margin-top:8px;line-height:1.5}
+.kv .i.w .v{color:#0b6b39} .kv .i.l .v{color:#a11d2c}
+.bars{font-size:14px}
+.bars .r{display:flex;align-items:center;gap:11px;margin:6px 0}
+.bars .lb{width:104px;text-align:right;color:#666;flex:none;font-variant-numeric:tabular-nums}
+.bars .tr{flex:1;height:22px;position:relative;background:#f1f1f1}
+.bars .f{display:block;height:100%}
+.bars .vl{width:78px;flex:none;font-variant-numeric:tabular-nums;font-weight:600}
+.bars .one{position:absolute;top:-3px;bottom:-3px;width:1px;background:#999}
+.lgd{font-size:13px;color:#888;margin:2px 0 8px 115px}
+.lgd i{display:inline-block;width:11px;height:11px;margin:0 5px 0 14px;vertical-align:-1px}
+.lgd i:first-child{margin-left:0}
+.big{font-size:22px;line-height:1.55;font-weight:600}
+.rule{border:0;border-top:1.6px solid #111;margin:6px 0}
+@media print{
+  body{font-size:12pt}
+  .pg{min-height:auto;height:190mm;page-break-after:always;border-bottom:0;padding:15mm 14mm 10mm;max-width:none}
+  @page{size:A4 landscape;margin:0}
+}
+</style>
+</head>
+<body>
+<section class="pg" style="justify-content:center">
+  <div class="tag">Ascend 910B4 · CANN 8.5.0 · vLLM v0.13.0 + vllm-ascend</div>
+  <h1 style="margin-top:14px">Mid-group W4A8<br/>把 INT4 Cube 变成 QwQ-32B 上可部署的推理加速</h1>
+  <p class="lead" style="font-size:19px;max-width:800px;margin-top:26px">
+    权重 <b>62 GB → 19 GB</b>,首次在<b>单张 910B4</b> 上跑通完整 64 层 QwQ-32B,
+    KV 容量 <b>143,744 tokens</b>、<b>33.1 tok/s</b>,每卡吞吐是 TP=4 的 <b>3.6×</b>。</p>
+  <hr class="rule" style="margin:32px 0 18px;max-width:800px"/>
+  <table style="max-width:800px;font-size:15px">
+    <tbody>
+    <tr><td style="width:96px;color:#777;border:0">模型</td><td style="border:0">QwQ-32B · 64 层 · 5120 / 27648 · GQA 40:8 · 32.8 B</td></tr>
+    <tr><td style="color:#777;border:0">硬件</td><td style="border:0">Ascend 910B4(实测 60.96 GiB HBM/卡)</td></tr>
+    <tr><td style="color:#777;border:0;border-bottom:0">日期</td><td style="border:0">2026-08-31 · 阶段 P0 – P9</td></tr>
+    </tbody>
+  </table>
+  <span class="no">1 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">提要</div>
+  <h2>核心结果</h2>
+  <div class="bd">
+    <div class="kv">
+      <div class="i w"><div class="v">3.5×</div><div class="t">权重压缩<br/>62 → 19 GB</div></div>
+      <div class="i w"><div class="v">单卡</div><div class="t">完整 64 层跑通<br/>BF16 装不下</div></div>
+      <div class="i w"><div class="v">2.1×</div><div class="t">PP=4 解码<br/>vs BF16</div></div>
+      <div class="i l"><div class="v">1.16×</div><div class="t">TP=4 解码<br/>PP 的优势在此塌掉</div></div>
+    </div>
+    <hr class="rule"/>
+    <div class="box"><span class="h">一句话</span>
+      W4A8 的收益域是<b>「小 M × 大 K × 层内无集合通信」</b>。
+      PP 与单卡都在域内,TP、prefill、高并发都在域外——<b>而这三处输的是同一笔开销。</b></div>
+    <div class="box l"><span class="h">一条限定</span>
+      <b>精度门禁仍未通过</b>(PPL +3.52% 过,GLUE −4.5 点不过)。本工作是工程验证。</div>
+  </div>
+  <span class="no">2 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">背景 · 一</div>
+  <h2>困境之一:权重把卡吃满,KV 无处可放</h2>
+  <div class="bd">
+    <table style="max-width:760px">
+      <caption>QwQ-32B 在一张 910B4(60.96 GiB)上</caption>
+      <thead><tr><th>项</th><th class="n">占用</th><th>后果</th></tr></thead>
+      <tbody>
+      <tr><td>BF16 权重</td><td class="n">61.0 GiB</td><td class="l">单卡装不下</td></tr>
+      <tr><td>框架常驻</td><td class="n">~3.4 GiB</td><td>—</td></tr>
+      <tr><td>KV cache</td><td class="n">256 KiB / token</td><td>并发 × 上下文的上限</td></tr>
+      </tbody>
+    </table>
+    <div class="box l"><span class="h">权重挤占的每一 GB,都从 KV 预算里直接扣</span>
+      而 KV 容量决定能同时服务多少请求、能支持多长上下文。<b>这不是「慢一点」,是「服务不了」。</b></div>
+  </div>
+  <span class="no">3 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">背景 · 二</div>
+  <h2>困境之二:解码是访存受限的,算力用不上</h2>
+  <div class="bd">
+    <p class="big">自回归解码每步只处理 <code>M = batch</code> 行,<br/>却要把<b>整个模型的权重</b>从 HBM 流过一遍。</p>
+    <div class="box"><span class="h">此时 Cube 大量空闲</span>
+      时间几乎完全由<b>权重的字节数</b>决定,而不是由算力决定。</div>
+    <div class="box w"><span class="h">所以结论是直接的</span>
+      在解码档,<b>把权重字节减半,延迟就接近减半</b>。<br/>
+      算力优化在这里没有意义 —— <b>压缩权重是唯一有效的杠杆。</b></div>
+  </div>
+  <span class="no">4 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">背景 · 三</div>
+  <h2>为什么是 W4A8</h2>
+  <div class="bd">
+    <table>
+      <thead><tr><th>方案</th><th class="n">权重</th><th class="n">激活</th><th>解码期收益来源</th></tr></thead>
+      <tbody>
+      <tr><td>BF16</td><td class="n">16 bit</td><td class="n">16 bit</td><td>—</td></tr>
+      <tr><td>W8A8</td><td class="n">8 bit</td><td class="n">8 bit</td><td>字节减半 + int8 Cube</td></tr>
+      <tr style="background:#f4faf6"><td><b>W4A8</b></td><td class="n"><b>4 bit</b></td><td class="n">8 bit</td><td><b>字节再减半</b>,激活保 8 bit 护精度</td></tr>
+      <tr><td>W4A4</td><td class="n">4 bit</td><td class="n">4 bit</td><td>激活降 4 bit,精度悬崖</td></tr>
+      </tbody>
+    </table>
+    <div class="box w"><span class="h">W4A8 是内存与精度的平衡点</span>
+      权重占 GEMM 输入字节的绝大部分,压到 4 bit 收益最大;激活留 8 bit,避开 W4A4 的精度风险。</div>
+  </div>
+  <span class="no">5 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">背景 · 四</div>
+  <h2>目标(Definition of Done)</h2>
+  <div class="bd">
+    <ol style="font-size:18px">
+      <li>给出精度关于<b>分组粒度</b>的曲线,据此冻结唯一的 <code>GK</code>;</li>
+      <li>该配置下精度退化在<b>事先写定</b>的阈值内;</li>
+      <li>自研 AscendC kernel 正确,且<b>解码档延迟低于同结构 W8A8</b>;</li>
+      <li>接入 vLLM,对冻结基线给出可比数字。</li>
+    </ol>
+    <div class="box y"><span class="h">但量化不是免费的</span>
+      它要跨过<b>两道彼此独立</b>的关:一道在<b>算法</b>上(精度退化),
+      一道在<b>系统</b>上(NPU 架构对量化的支持程度)。</div>
+  </div>
+  <span class="no">6 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">挑战 A · 现象</div>
+  <h2>挑战 A:精度退化</h2>
+  <div class="bd">
+    <table style="max-width:720px">
+      <caption>WikiText-2 完整 test split(150 窗口 / 307k token),相对 W8A8</caption>
+      <thead><tr><th>配置</th><th class="n">ΔPPL</th><th>判定</th></tr></thead>
+      <tbody>
+      <tr><td>W8A8-mg(int8 分组)</td><td class="n w">−0.10%</td><td>无损</td></tr>
+      <tr><td>W4A8-pc(per-channel int4)</td><td class="n l">+33.85%</td><td class="l">完全不可用</td></tr>
+      <tr><td>W4A8-mg1024(对称)</td><td class="n l">+9.03%</td><td class="l">不达标</td></tr>
+      </tbody>
+    </table>
+    <div class="box l"><span class="h">从 +33.85% 到 +9.03%:分组量化救了一大半</span>
+      沿 K 把权重与激活切组、组内独立 rescale,把离群值的影响限制在组内。<br/>
+      <b>但仍差得远 —— 缺口的主体不在这里。</b></div>
+  </div>
+  <span class="no">7 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">挑战 A · 诊断</div>
+  <h2>缩小分组不是杠杆,非对称才是</h2>
+  <div class="bd">
+    <table style="max-width:560px">
+      <thead><tr><th class="n">GK</th><th class="n">对称</th><th class="n">非对称</th></tr></thead>
+      <tbody>
+      <tr><td class="n">128</td><td class="n">+5.58%</td><td class="n">+3.02%</td></tr>
+      <tr><td class="n">512</td><td class="n">+8.33%</td><td class="n">+6.04%</td></tr>
+      <tr><td class="n">1024</td><td class="n">+9.03%</td><td class="n w">+3.56%</td></tr>
+      </tbody>
+    </table>
+    <div class="box l"><span class="h">缩组无效:它作用在了不是瓶颈的那一侧</span>
+      GK 从 1024 缩到 128(组数 <b>8 倍</b>,kernel 根本买不起)只赚回约 <b>1/3</b> 缺口。<br/>
+      机理:分组对<b>激活</b>值钱(+8.5 dB),对 <b>int4 权重几乎无效</b>(13.8 → 18.3 dB)。
+      int4 权重的难度是<b>行内的无结构散布</b>。</div>
+    <div class="box w"><span class="h">真正的杠杆:非对称权重(每组零点)</span>
+      <b>+9.03% → +3.56%,一次拿回 5.5 个百分点</b>,而 kernel 只多一个「每组的激活行和」。</div>
+  </div>
+  <span class="no">8 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">挑战 B · 一</div>
+  <h2>挑战 B1:Cube 没有混合位宽指令</h2>
+  <div class="bd">
+    <pre>MmadCal 只接受两种整型组合:
+  &lt;int32, int8,    int8   &gt;  → mad
+  &lt;int32, int4b_t, int4b_t&gt;  → mad_s4</pre>
+    <p class="big">「A 8 bit、W 4 bit」在硬件上<b>不存在</b>。</p>
+    <ul>
+      <li>把 W 升到 int8 ⇒ <b>访存收益归零,纯亏</b>;</li>
+      <li>把 A <b>拆成两个 int4 平面</b>走 <code>mad_s4</code>(MSD 分解)。</li>
+    </ul>
+    <div class="box l"><span class="h">代价:算力优势恒为零</span>
+      MSD 意味着<b>两遍 Mmad</b>。即使 int4 Cube 是 int8 的 2×,
+      <code>2 遍 × 2× 速率 = 与一遍 int8 完全相等</code>。
+      <b>收益只能来自访存</b> —— 这条算术会在第 30 页解释 prefill 为什么必输。</div>
+  </div>
+  <span class="no">9 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">挑战 B · 二</div>
+  <h2>挑战 B2:分组量化逼迫 L0C 反复冲刷</h2>
+  <div class="bd">
+    <table style="max-width:660px">
+      <thead><tr><th>每输出 tile</th><th class="n">per-channel</th><th class="n">mid-group</th></tr></thead>
+      <tbody>
+      <tr><td>Fixpipe(L0C→GM)次数</td><td class="n">1</td><td class="n l">K/GK(5–27)</td></tr>
+      <tr><td>CrossCore 握手对</td><td class="n">1</td><td class="n l">K/GK</td></tr>
+      <tr><td>AIV 的 pass 数</td><td class="n">1</td><td class="n l">K/GK</td></tr>
+      </tbody>
+    </table>
+    <div class="box l"><span class="h">实测:这是纯固定开销</span>
+      TILE_M=16 时每次额外冲刷 <b>0.5–1.1 µs</b>,而那时 AIV 每组只处理 1024 个元素
+      —— <b>数据量微不足道</b>。归因不是带宽、不是握手本身,是
+      <b>AIV 每组固定的指令发射开销</b>。</div>
+    <div class="box y">这笔开销<b>贯穿整个项目</b>,后面每一处失败都能追溯到它。<br/>
+      <span class="note">我们对它的回答是<b>方法 · 四(第 20 页)的 CV 流水</b> —— 不是消除,是把它压到一条流水线里并给出它的收益域边界。</span></div>
+  </div>
+  <span class="no">10 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">挑战 B · 三</div>
+  <h2>挑战 B3:Cube 与 Vector 必须跨核协作</h2>
+  <div class="bd">
+    <pre>AIC  Mmad ─► Fixpipe(L0C ─► GM workspace) ─► SetFlag
+                                               │
+AIV  WaitFlag ─► 读 int32 partial              │
+     ─► 每组 dequant + fp32 累加(UB)           │
+     ─► SetFlag 归还 slot ─────────────────────┘</pre>
+    <div class="box"><span class="h">为什么躲不开</span>
+      Fixpipe 只能施加<b>标量或向量</b>形式的 scale,
+      <b>处理不了 per-group × per-token 的哈达玛乘</b> —— 反量化必须交给 AIV。</div>
+    <div class="box l">于是<b>每个量化组的部分和都要走一趟 <code>L0C → GM → UB</code>,外加两次 CrossCore 握手。</b></div>
+    <div class="box w"><span class="h">这条约束定义了本工作的核心 kernel 设计</span>
+      B2 + B3 合起来要求一条<b>「load → Cube → L0C→GM→UB 中转 → Vector → store」</b>的软件流水,
+      它是我们的第 ⑤ 个设计决策,详见<b>方法 · 四(第 20 页)</b>。</div>
+  </div>
+  <span class="no">11 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">挑战 · 小结</div>
+  <h2>三条挑战是链式的,不是并列的</h2>
+  <div class="bd">
+    <pre style="font-size:15px;line-height:2">B1  Cube 无混合位宽
+      └─► 逼出 <b>MSD 分解</b>(算力优势归零,只剩访存)
+
+A   int4 权重精度不够
+      └─► 逼出 <b>分组量化 + 非对称</b>
+
+            └─► 制造 <b>B2</b>:每组一次 L0C 冲刷
+                  └─► Fixpipe 能力不足
+                        └─► 制造 <b>B3</b>:每组一趟跨核往返</pre>
+    <div class="box y"><span class="h">方案的每一分精度收益,都要在流水上付一次固定开销</span>
+      这条链是全项目的主线。</div>
+  </div>
+  <span class="no">12 / 46</span>
+</section>
+<section class="pg">
+  <div class="tag">动机 · 一</div>
+  <h2>动机:现成方案没有兑现量化的收益</h2>
+  <div class="bd">
+    <table>
+      <caption>厂商 W4A8 每层斜率相对 BF16(TP=1,图捕获口径)</caption>
+      <thead><tr><th class="n">batch</th><th class="n">1</th><th class="n">16</th><th class="n">32</th><th class="n">64</th><th class="n">128</th><th class="n">256</th></tr></thead>
+      <tbody>
+      <tr><td>vs BF16</td><td class="n w">2.43×</td><td class="n">1.40×</td><td class="n l">0.73×</td><td class="n l">0.80×</td><td class="n l">0.76×</td><td class="n l">0.89×</td></tr>
+      </tbody>
+    </table>
+    <div class="box l"><span class="h">原因:它是 weight-only,不是真 W4A8</span>
+      厂商路径把 int4 <b>反量化成 bf16 再做矩阵乘</b>,<b>激活的 int8 从未进入 Cube</b>。</div>
+    <div class="two">
+      <div class="box"><b>M=1 它几乎不吃亏</b>(2.43×)<br/>
+        解码是访存受限的,weight-only 照样只读 int4。它放弃的是<b>算力</b>,而 M=1 不缺算力。</div>
+      <div class="box l"><b>batch≥32 它崩掉</b><br/>
+        Cube 成为瓶颈后必须按 bf16 算力算,还要多付一遍反量化。</div>
+    </div>
+  </div>
+  <span class="no">13 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">动机 · 二</div>
+  <h2>对照组本身也不对等</h2>
+  <div class="bd">
+    <div class="box l"><span class="h">厂商 W8A8 把全部 64 个 down_proj 标成 <code>FLOAT</code></span>
+      down_proj 是层内最大的 GEMM(K=27648,占 29% 参数)。<b>两条独立证据:</b><br/>
+      ① 运行时逐 rank 查 <code>quant_method</code> 类名,每 rank 8 个 linear 中 2 个是未量化类;<br/>
+      ② <b>磁盘 41 GB 而不是 34 GB</b> —— 正好是 down_proj 留 BF16 的体积。</div>
+    <div class="box y">⇒ 「我们的 W8A8 比原生快」<b>主要来自量化的层集不同,不是 kernel 更快。</b>
+      这类比较必须先说清楚双方量化了什么。</div>
+  </div>
+  <span class="no">14 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">动机 · 三</div>
+  <h2>地基验证:INT4 Cube 确实是 INT8 的 2×</h2>
+  <div class="bd">
+    <table style="max-width:640px">
+      <caption>自写 per-channel W4A8 vs W8A8(同流水、同 harness、同 tile 几何)</caption>
+      <thead><tr><th>规模</th><th class="n">W4A8 vs W8A8</th></tr></thead>
+      <tbody>
+      <tr><td>M = 1..16(decode)</td><td class="n w">1.65 – 1.88×</td></tr>
+      <tr><td>M = 1024(prefill)</td><td class="n w">1.57 – 1.62×</td></tr>
+      <tr><td>M ≤ 16 vs 纯 W4A4</td><td class="n">仅慢 3–8%</td></tr>
+      </tbody>
+    </table>
+    <div class="box w"><span class="h">MSD 架构是对的</span>
+      W4A8 不但达到 W8A8,还全面超过它。
+      ⇒ <b>收益真实存在,现成方案只是没有去取。</b></div>
+    <div class="box">于是本工作要做的是:算法上用<b>分组 + 非对称</b>过精度关,
+      系统上用 <b>MSD + 自研 AscendC kernel</b> 过架构关,并完整接入 vLLM。</div>
+  </div>
+  <span class="no">15 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">方法 · 总览</div>
+  <h2>五个设计决策</h2>
+  <div class="bd">
+    <table style="font-size:15px">
+      <thead><tr><th style="width:132px">决策</th><th style="width:88px">针对</th><th>内容</th></tr></thead>
+      <tbody>
+      <tr><td><b>① MSD 分解</b></td><td>B1</td><td>int8 激活按数值位拆成两个 int4 平面,<b>对全部 256 个值精确</b></td></tr>
+      <tr><td><b>② mid-group</b></td><td>A</td><td>沿 K 分组,A 与 W <b>共用组边界</b>,<code>GK</code> 冻结为 <b>1024</b></td></tr>
+      <tr><td><b>③ 非对称权重</b></td><td>A</td><td>每组一个零点,展开成 rank-1 修正项;<b>实测几乎免费</b></td></tr>
+      <tr><td><b>④ ragged-K</b></td><td>部署</td><td>原生吃任意 K,每组补零到一个 int4 fractal,<b>补零逐位精确</b></td></tr>
+      <tr style="background:#f4faf6"><td><b>⑤ CV 流水</b></td><td>B2 · B3</td><td>stacked-A 单次 Fixpipe + <code>L0C→GM→UB</code> 双 slot 中转,<b>让「分组量化 + MSD」在 Cube 上可执行</b></td></tr>
+      </tbody>
+    </table>
+    <div class="box w"><span class="h">关键:MSD 与分组是<u>正交</u>的</span>
+      拆分沿<b>数值位</b>,分组沿 <b>K</b>。⇒ mid-group 不需要重新设计 MSD;
+      且 <b>MSD 对精度零影响</b>,所以算法侧实验完全不必建模它 ——
+      <b>这让算法与 kernel 两条线能并行推进。</b></div>
+  </div>
+  <span class="no">16 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">方法 · 一</div>
+  <h2>mid-group 量化与 MSD 分解</h2>
+  <div class="bd">
+    <pre>y[m,n] = Σ_g  as[m,g] · ws[n,g] · ( Σ_{k∈g} A_q[m,k]·W_q[n,k] )
+
+A_q [M,K] int8   as [M, K/GK] bf16   per-token × per-group,动态
+W_q [N,K] int4   ws [N, K/GK] bf16   per-channel × per-group</pre>
+    <pre>a = 16·h + l + 8,   h = a >> 4        ∈ [-8,7]
+                    l = (a & 15) ^ 8  ∈ [-8,7]
+
+C = 16·Σ h·w + Σ l·w + 8·Σ_k W[n,k]
+                        └── w_ksum:权重侧一次性预处理</pre>
+    <div class="box"><span class="h">实现:stacked-A</span>
+      h / l 两平面<b>沿 M 叠</b>成 <code>2·TILE_M</code> 的 Cube tile,共享同一个 B
+      ⇒ <b>一条 Mmad、一个 L0C、一次 Fixpipe</b>。</div>
+  </div>
+  <span class="no">17 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">方法 · 二</div>
+  <h2>两个会静默出错的地方</h2>
+  <div class="bd">
+    <div class="box l"><span class="h">① <code>w_ksum</code> 不减零点</span>
+      它来自 MSD 的 <code>+8</code> 偏置,<b>与非对称无关</b>;零点走独立的 <code>wz·a_ksum</code> 项。<br/>
+      两者<b>形状相同、来源无关</b> —— 混用只掉 SNR,<b>不报错</b>。</div>
+    <div class="box l"><span class="h">② <code>a_ksum</code> 必须是 int32</span>
+      GK=1024 的行和达 ~1.3e5,bf16 的 8 位尾数会舍到 ~0.2%,而零点项与主项同量级。<br/>
+      对照:<code>wz</code> 留 bf16 是安全的(<code>[-8,7]</code> 的整数,bf16 精确)。</div>
+    <div class="box y"><span class="h">由此立下的判据</span>
+      是<b>「这个量能否被 bf16 精确表示」</b>,不是「它是不是 scale 类的量」。</div>
+  </div>
+  <span class="no">18 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">方法 · 三</div>
+  <h2>ragged-K:让算子吃任意 K</h2>
+  <div class="bd">
+    <pre>G       = ceil(K / GK)
+n_g     = min(GK, K - g*GK)        // 第 g 组真实元素数
+n_g_pad = ceil(n_g / 64) * 64      // 补到一个 int4 fractal
+offset  = g * ceil(GK / 64)</pre>
+    <div class="box w"><span class="h">补零是精确的,不是近似的</span>
+      补进去的 <code>q=0</code> 对 Mmad 贡献 0,对两个 rank-1 修正项也贡献 0
+      —— 因为那两个和是在<b>补齐后</b>的范围上求的。<br/>
+      ⇒ <b>没有任何地方需要记录「真实元素数」</b>,kernel 里不需要掩码。</div>
+    <div class="box"><span class="h">对齐形状零退化</span>
+      运行期化后六个形状全在 lab 噪声地板 <b>±2.6%</b> 内(−0.5% ~ −2.1%),
+      精度 <b>= 签核配置(+0.05 dB)</b>。</div>
+  </div>
+  <span class="no">19 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">方法 · 四</div>
+  <h2>CV 流水:load → Cube → L0C→GM→UB 中转 → Vector → store</h2>
+  <div class="bd">
+    <pre>AIC   GM ──DMA──► L1 ──► L0A / L0B ──Mmad──► L0C (int32)
+                                                 │  每个量化组一次
+                                          Fixpipe│
+                                                 ▼
+                                   GM workspace(2 slot 双缓冲)
+        ── SetFlag(kAicToAiv) ────────────────────┼──────────────► WaitFlag ──
+                                                 ▼
+AIV                                   UB ◄─── int32 部分和
+                       每组 dequant(as·ws)+ fp32 累加(+ 非对称 rank-1 折叠)
+                       ── SetFlag(kAivToAic) 归还 slot ──► 下一组的 Mmad 已在跑
+                       全部组累加完 ──► bf16 ──► GM (store)</pre>
+    <table style="font-size:14.5px">
+      <thead><tr><th style="width:158px">这一页的四个设计</th><th>为什么非这样不可</th></tr></thead>
+      <tbody>
+      <tr><td><b>stacked-A</b></td><td>MSD 的 h / l 两平面沿 M 叠成 <code>2·TILE_M</code>、共享同一个 B ⇒ <b>一条 Mmad、一个 L0C、一次 Fixpipe</b>,而不是把 int4 平面跑两遍</td></tr>
+      <tr><td><b>A 与 W 共用组边界</b></td><td>一次冲刷同时服务两侧的 dequant scale。若 per-token 与 per-channel 的组边界不对齐,同一块 L0C 要冲刷两次</td></tr>
+      <tr><td><b>GM 中转 + 双 slot</b></td><td><b>L0C 读不到 Vector 侧</b>,而分组累加又必须在 fp32 做 ⇒ 部分和只能经 GM 交给 AIV;2 个 slot + 4 个 CrossCore flag 让 Cube 的<b>下一组</b>与 Vector 的<b>当前组</b>重叠</td></tr>
+      <tr><td><b>中转全程 int32</b></td><td>与 CPU 参考<b>逐位一致</b>,门禁才能用位比较而不是阈值。<code>BF16_FLUSH</code> 能把 workspace 字节双向减半,但不逐位一致 ⇒ <b>明确不设默认</b></td></tr>
+      </tbody>
+    </table>
+    <div class="box y"><span class="h">同一页必须讲代价:这条流水也是收益域的边界</span>
+      每个量化组都要走一趟 <code>L0C→GM→UB</code> 加两次握手,这笔开销<b>按冲刷次数收费,不按字节体积</b>
+      —— 六条窄化字节 / 改调度的路全部 ≤5%,而<b>直接删掉 Fixpipe 就抹平整笔税</b>(P5 消融)。
+      它与 K 无关却要分摊到 K 上:<b>K=1280 只有 2 组摊不开,K=27648 有 27 组就摊开了</b>。
+      后面「一条曲线解释全部三处失败」里的那个固定项,源头就在这一页。</div>
+  </div>
+  <span class="no">20 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">实验设置 · 一</div>
+  <h2>五条 arm,它们并不对等</h2>
+  <div class="bd">
+    <table>
+      <thead><tr><th>arm</th><th>路径</th><th>覆盖的层</th></tr></thead>
+      <tbody>
+      <tr><td><code>bf16</code></td><td>原生</td><td>—</td></tr>
+      <tr><td><code>w8a8-native</code></td><td>vllm-ascend</td><td class="l">缺 64 个 down_proj</td></tr>
+      <tr><td><code>w4a8-native</code></td><td>vllm-ascend</td><td class="l">weight-only,激活不进 Cube</td></tr>
+      <tr style="background:#f4faf6"><td><code>w8a8</code>(我们)</td><td>同一钩子转换</td><td class="w">四种投影</td></tr>
+      <tr style="background:#f4faf6"><td><b><code>w4a8</code>(我们)</b></td><td>同一钩子转换</td><td class="w">四种投影 · mg1024-asym</td></tr>
+      </tbody>
+    </table>
+    <div class="box"><span class="h">只有绿色那一对的比值干净地隔离了 GEMM</span>
+      同一份 BF16 权重、同一个加载钩子、同一组 64 个 linear。其余比值都混入了 checkpoint 与转换路径的差异。</div>
+  </div>
+  <span class="no">21 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">实验设置 · 二</div>
+  <h2>生效证据必须是主动查询</h2>
+  <div class="bd">
+    <div class="box l"><span class="h">日志的缺席不是证据</span>
+      转换日志每 64 次才打一行,父进程计数器在多 rank 下天然是 0 ——
+      曾有一轮 PP=4 就是这么被当成 W4A8 测的,<b>实际全程 BF16</b>。</div>
+    <div class="box w"><span class="h">现在两道都是查询返回值</span>
+      ① <code>collective_rpc</code> 逐 rank 查 <code>converted=</code>,任一 rank 为 0 直接拒绝出数;<br/>
+      ② <code>apply_model</code> 逐 rank 查每个 Linear 的 <code>quant_method</code> 类名 ——
+      <b>这条对五条 arm 都生效</b>,厂商 W8A8 的 down_proj 缺口就是这么发现的。</div>
+  </div>
+  <span class="no">22 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">实验设置 · 三</div>
+  <h2>噪声带:±15%,比很多效果还宽</h2>
+  <div class="bd">
+    <table style="max-width:600px">
+      <caption>60 个重复测点</caption>
+      <thead><tr><th></th><th class="n">median</th><th class="n">p90</th><th class="n">最坏</th></tr></thead>
+      <tbody>
+      <tr><td>绝对 <code>step_us</code></td><td class="n">1.8%</td><td class="n">7.2%</td><td class="n l">15.0%</td></tr>
+      <tr><td>比值(跨轮)</td><td class="n">3.1–5.2%</td><td class="n">—</td><td class="n l">17.1%</td></tr>
+      </tbody>
+    </table>
+    <div class="box l"><span class="h">比值并不能抵消漂移</span>
+      ⇒ <b>小于 5% 的单点差异不作数</b>;比值按<b>两位有效数字</b>读(「约 2.0×」不是「2.08×」)。</div>
+    <div class="box y">⚠ 全部配置<b>单次跑</b>,「≥3 次重复 + 离散度」<b>从未做过</b>,已列入欠账。</div>
+  </div>
+  <span class="no">23 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">实验设置 · 四</div>
+  <h2>三个曾让结论反号的计时陷阱</h2>
+  <div class="bd">
+    <table>
+      <thead><tr><th style="width:190px">陷阱</th><th>后果</th></tr></thead>
+      <tbody>
+      <tr><td>eager 计时</td><td>量的是 python 下发;量化路径每投影多 3–4 次下发,<b>必然显得更慢</b></td></tr>
+      <tr><td>手搭图 ≠ 引擎图</td><td>不经 dynamo,量不到 python 分支被折掉</td></tr>
+      <tr><td>默认 <code>PIECEWISE</code></td><td>每层被 attention 切开、段间跑 python,<b>白亏 2 倍</b></td></tr>
+      </tbody>
+    </table>
+    <div class="box y">⚠ 显式传 <code>FULL_AND_PIECEWISE</code> 会被<b>静默降级</b>;NPU 上必须写 <code>FULL_DECODE_ONLY</code>。</div>
+    <div class="box"><span class="h">由此立下的规矩</span>
+      任何「X 比 Y 快 / 慢」的结论<b>必须带 M 档</b> —— 三条路的排序<b>在 M 上会换位</b>。
+      单工作点外推的错误本项目犯过两次。</div>
+  </div>
+  <span class="no">24 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">结果 · 1</div>
+  <h2>kernel 正确性:三级门禁</h2>
+  <div class="bd top">
+    <table style="font-size:14.5px">
+      <thead><tr><th>门禁</th><th>结果</th></tr></thead>
+      <tbody>
+      <tr><td>逐 shape(真实 scale + 零点)</td><td class="w">SNR 91.7 – 139.6 dB</td></tr>
+      <tr><td>race 压测(tile 数 &gt; blockDim)</td><td class="w">30/30 × 3 build</td></tr>
+      <tr><td>与算法的<b>接缝</b></td><td class="w">8192/8192 逐位</td></tr>
+      <tr><td>激活量化 kernel 四个输出</td><td class="w"><b>逐字节</b>相同</td></tr>
+      <tr><td>ragged-K(lab + torch 全链路)</td><td class="w">62/62 + 65/65</td></tr>
+      <tr><td>接入 vLLM 后对旧 <code>.so</code> 回归</td><td class="w">42/42 逐位</td></tr>
+      <tr style="background:#fdf5f6"><td><b>负对照</b> <code>a_ksum</code> 符号翻转</td><td class="l">−3.26 dB(正确地失败)</td></tr>
+      <tr style="background:#fdf5f6"><td><b>负对照</b> asym 数据喂 sym build</td><td class="l">9.78 dB(正确地失败)</td></tr>
+      </tbody>
+    </table>
+    <div class="box"><span class="h">没有最后两行,前面六行不值钱</span>
+      它们只能证明两边一致,<b>不能证明两边正确</b>。CPU 参考也因此按<b>定义</b>算,
+      不借 kernel 的恒等式 —— 借了的话符号写反会两边一起错。</div>
+  </div>
+  <span class="no">25 / 46</span>
+</section>
+<section class="pg">
+  <div class="tag">结果 · 2</div>
+  <h2>kernel 性能:解码档达标,大 M 收窄</h2>
+  <div class="bd">
+    <table style="font-size:14.5px">
+      <caption>每层四种 Linear 合计(µs,cold,median-of-3)。<b>给 W8A8 也记了同一份激活量化开销。</b></caption>
+      <thead><tr><th class="n">M</th><th class="n">W8A8</th><th class="n">W4A8-pc</th><th class="n">mg1024</th><th class="n">+quant</th><th class="n">含 quant 比</th></tr></thead>
+      <tbody>
+      <tr><td class="n">1</td><td class="n">446.9</td><td class="n">257.2</td><td class="n">282.2</td><td class="n">310.6</td><td class="n w"><b>1.53×</b></td></tr>
+      <tr><td class="n">16</td><td class="n">444.8</td><td class="n">258.6</td><td class="n">281.9</td><td class="n">319.2</td><td class="n w"><b>1.51×</b></td></tr>
+      <tr><td class="n">64</td><td class="n">513.3</td><td class="n">327.5</td><td class="n">387.9</td><td class="n">439.0</td><td class="n">1.29×</td></tr>
+      <tr><td class="n">128</td><td class="n">642.1</td><td class="n">495.5</td><td class="n">545.1</td><td class="n">619.0</td><td class="n">1.16×</td></tr>
+      <tr><td class="n">1024</td><td class="n">4042.1</td><td class="n">2598.1</td><td class="n">3711.3</td><td class="n">4128.6</td><td class="n m">1.08×</td></tr>
+      </tbody>
+    </table>
+    <div class="box l"><span class="h">决定性对照:输的是分组冲刷,不是 MSD</span>
+      M=1024 时 mid-group 对 W8A8 是 <b>0.76×(输)</b>,
+      而同样做 MSD 的 <b>per-channel int4 对 W8A8 是 1.12×(仍赢)</b>。<br/>
+      ⇒ <b>架构是对的,应当修 kernel,而不是按 M 分派。</b></div>
+  </div>
+  <span class="no">26 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">结果 · 3</div>
+  <h2>接入 vLLM:两项改动,缺一不可</h2>
+  <div class="bd">
+    <table style="max-width:620px">
+      <thead><tr><th>阶段</th><th class="n">µs / 层</th><th class="n">vs BF16</th></tr></thead>
+      <tbody>
+      <tr><td>接入引擎,原样</td><td class="n">882.1</td><td class="n">1.34×</td></tr>
+      <tr><td>＋ 补齐搬进量化算子</td><td class="n">878.5</td><td class="n">1.41×</td></tr>
+      <tr><td>＋ <code>FULL_DECODE_ONLY</code></td><td class="n"><b>385.8</b></td><td class="n w"><b>2.82×</b></td></tr>
+      </tbody>
+    </table>
+    <div class="box"><b>补齐</b>:<code>PadV3</code>/<code>MemSet</code> 各 3840 次 <b>→ 归零</b>,投影设备时间 <b>−44%</b>。
+      但墙上时间几乎没动 —— <b>当时引擎是主机受限的</b>(利用率 36%)。</div>
+    <div class="box"><b>图模式</b>:<code>Computing</code> 几乎不变,<b><code>Free</code> 掉了 481 ms</b>。空隙就是 PIECEWISE 的分段边界。</div>
+    <div class="box l"><span class="h">由此推翻的一个自己的判断</span>
+      「补齐修掉后应到 1.5–1.8×」是错的。<b>拿设备时间推墙上时间,中间少了一步「设备是不是瓶颈」。</b></div>
+  </div>
+  <span class="no">27 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">结果 · 4</div>
+  <h2>层级五路对照(每层斜率,TP=1)</h2>
+  <div class="bd">
+    <table>
+      <caption>我们的 W4A8 相对各 arm 的加速(&gt;1 = 我们赢)</caption>
+      <thead><tr><th>对手</th><th class="n">1</th><th class="n">16</th><th class="n">32</th><th class="n">64</th><th class="n">96</th><th class="n">128</th><th class="n">256</th></tr></thead>
+      <tbody>
+      <tr><td>原生 W4A8</td><td class="n w">1.08</td><td class="n w">1.77</td><td class="n w">2.77</td><td class="n w">2.72</td><td class="n w">1.95</td><td class="n w">2.27</td><td class="n w">1.48</td></tr>
+      <tr><td>原生 BF16</td><td class="n w">2.63</td><td class="n w">2.49</td><td class="n w">2.03</td><td class="n w">2.17</td><td class="n w">1.76</td><td class="n w">1.73</td><td class="n w">1.31</td></tr>
+      <tr><td><b>我们 W8A8</b></td><td class="n w">1.19</td><td class="n w">1.15</td><td class="n m">1.02</td><td class="n w">1.14</td><td class="n l">0.88</td><td class="n l">0.95</td><td class="n l">0.82</td></tr>
+      </tbody>
+    </table>
+    <div class="box w"><span class="h">交叉验证:两个独立口径给出同一个数</span>
+      手搭图 <b>376.6 µs/层</b>(1.33×)· 引擎 <b>385.8 µs/层</b>(1.32×)。
+      PIECEWISE 下这两个口径差 2.3 倍、无法互证。</div>
+  </div>
+  <span class="no">28 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">结果 · 5</div>
+  <h2>内存:唯一不随工作点换位的收益</h2>
+  <div class="bd">
+    <table>
+      <thead><tr><th>配置</th><th class="n">计算值</th><th class="n">磁盘实测</th><th class="n">vs BF16</th></tr></thead>
+      <tbody>
+      <tr><td>BF16</td><td class="n">65.5 GB</td><td class="n"><b>62 G</b></td><td class="n">1.00×</td></tr>
+      <tr><td>厂商 W8A8(down_proj 留 FLOAT)</td><td class="n">43.4 GB</td><td class="n"><b>41 G</b></td><td class="n">1.5×</td></tr>
+      <tr><td>我们 W8A8</td><td class="n">34.3 GB</td><td class="n">—</td><td class="n">1.9×</td></tr>
+      <tr style="background:#f4faf6"><td><b>我们 W4A8-mg</b></td><td class="n w"><b>19.0 GB</b></td><td class="n w"><b>19 G</b></td><td class="n w"><b>3.5×</b></td></tr>
+      </tbody>
+    </table>
+    <div class="box w"><span class="h">分组量化的元数据可以忽略</span>
+      <code>ws</code>/<code>wz</code>/<code>w_ksum</code> 合计 <b>0.24 GB = 1.3%</b>。
+      GK 缩到 256 也只占 5% ⇒ <b>GK 的选择完全由性能与精度决定,内存不参与。</b></div>
+  </div>
+  <span class="no">29 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">结果 · 6</div>
+  <h2>端到端 PP=4(真实 64 层):已交付</h2>
+  <div class="bd">
+    <table style="max-width:760px">
+      <thead><tr><th class="n">batch</th><th class="n">BF16</th><th class="n">我们 W8A8</th><th class="n">我们 W4A8</th><th class="n">vs BF16</th></tr></thead>
+      <tbody>
+      <tr><td class="n">1</td><td class="n">75445</td><td class="n">40088</td><td class="n w"><b>36235</b></td><td class="n w">2.08×</td></tr>
+      <tr><td class="n">16</td><td class="n">91826</td><td class="n">48658</td><td class="n w"><b>45797</b></td><td class="n w">2.01×</td></tr>
+      <tr><td class="n">64</td><td class="n">117572</td><td class="n">69992</td><td class="n w"><b>63629</b></td><td class="n w">1.85×</td></tr>
+      <tr><td class="n">128</td><td class="n">131555</td><td class="n w"><b>87202</b></td><td class="n">91878</td><td class="n">1.43×</td></tr>
+      </tbody>
+    </table>
+    <div class="box w"><b>优势不随 PP 衰减</b>:2.01 → 2.03 → 2.08(PP=1/2/4)。对我们自己的 W8A8 约 <b>1.1×</b>。<b>零 kernel 改动。</b></div>
+    <div class="box l"><span class="h">但三条硬边界</span>
+      ① <b>PP 只给容量不给延迟</b>(batch=1 只有 28 tok/s);
+      ② <b>prefill 一致地输 0.64–0.69×</b>(八点方向一致);
+      ③ <b>batch≥256 输给自己的 W8A8</b>(0.86–0.91×)。</div>
+  </div>
+  <span class="no">30 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">结果 · 7</div>
+  <h2>端到端 TP=4:塌掉的那条</h2>
+  <div class="bd">
+    <div class="bars">
+      <div class="lgd"><i style="background:#0b6b39"></i>PP=4<i style="background:#a11d2c"></i>TP=4<i style="background:#999;width:1px;height:12px"></i>1.0×</div>
+      <div class="r"><span class="lb">batch=1</span><span class="tr"><span class="f" style="width:83.2%;background:#0b6b39"></span><span class="one" style="left:40%"></span></span><span class="vl w">2.08×</span></div>
+      <div class="r"><span class="lb"></span><span class="tr"><span class="f" style="width:46.4%;background:#a11d2c"></span><span class="one" style="left:40%"></span></span><span class="vl">1.16×</span></div>
+      <div class="r"><span class="lb">batch=64</span><span class="tr"><span class="f" style="width:74.0%;background:#0b6b39"></span><span class="one" style="left:40%"></span></span><span class="vl w">1.85×</span></div>
+      <div class="r"><span class="lb"></span><span class="tr"><span class="f" style="width:41.6%;background:#a11d2c"></span><span class="one" style="left:40%"></span></span><span class="vl m">1.04×</span></div>
+    </div>
+    <table style="max-width:760px">
+      <caption>profiler 分解(µs/step):账逐项对上</caption>
+      <thead><tr><th class="n">TP</th><th class="n">Computing</th><th class="n">通信(未重叠)</th><th class="n">Overlapped</th><th class="n">合计</th></tr></thead>
+      <tbody>
+      <tr><td class="n">1</td><td class="n">6751</td><td class="n">0</td><td class="n">—</td><td class="n">12053</td></tr>
+      <tr><td class="n"><b>4</b></td><td class="n w"><b>3275</b></td><td class="n l"><b>3632</b></td><td class="n l"><b>0</b></td><td class="n">12882</td></tr>
+      </tbody>
+    </table>
+    <div class="box l"><b>TP 的失败不在 kernel</b> —— Computing <b>精确减半</b>。
+      问题是 <b><code>Overlapped = 0</code></b>:collective 一微秒都没和计算重叠。</div>
+  </div>
+  <span class="no">31 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">分析</div>
+  <h2>一条曲线解释全部三处失败</h2>
+  <div class="bd">
+    <table>
+      <caption>把 o_proj 耗时拟成 <code>固定开销 + K·斜率</code>(N=5120 固定,只扫 K)</caption>
+      <thead><tr><th class="n">M</th><th class="n">斜率比</th><th class="n">固定差</th><th class="n">交叉点 K*</th><th>含义</th></tr></thead>
+      <tbody>
+      <tr><td class="n">16</td><td class="n w"><b>0.60</b></td><td class="n">+2.5 µs</td><td class="n"><b>1665</b></td><td>解码:K &gt; 1665 才赢</td></tr>
+      <tr><td class="n">128</td><td class="n w"><b>0.53</b></td><td class="n">+10.8</td><td class="n"><b>3912</b></td><td>中并发:门槛抬高</td></tr>
+      <tr><td class="n">512</td><td class="n l"><b>1.00</b></td><td class="n">+16.8</td><td class="n l">不存在</td><td class="l">prefill:<b>任何 K 都输</b></td></tr>
+      </tbody>
+    </table>
+    <div class="box w"><b>① 访存优势完好</b>:斜率比 0.60 / 0.53,理论 0.5。<b>消失的不是斜率。</b></div>
+    <div class="box l"><b>② 消失的是固定开销</b>:随 M 单调涨 ⇒ <code>K* = 固定差 / 斜率差</code>。</div>
+    <div class="box l"><b>③ M=512 斜率比 = 1.00</b>:MSD 两遍 × int4 Cube 2× = 一遍 int8。<b>算术恒等,不是实现问题。</b></div>
+  </div>
+  <span class="no">32 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">分析</div>
+  <h2>三处失败是同一件事</h2>
+  <div class="bd">
+    <table>
+      <tbody>
+      <tr><td style="width:150px"><b>TP 塌掉</b></td><td>切 K ⇒ o_proj K=1280 &lt; K*=1665</td></tr>
+      <tr><td><b>prefill 输</b></td><td>M ≫ 512 ⇒ 斜率比 1.00 + 固定差</td></tr>
+      <tr><td><b>高并发输</b></td><td>M 涨 ⇒ 固定开销涨、K* 抬高</td></tr>
+      <tr style="background:#f4faf6"><td><b>PP / 单卡 赢</b></td><td><b>不切 K</b>(o=5120 / down=27648)且 M 小 ⇒ 都在收益域内</td></tr>
+      </tbody>
+    </table>
+    <hr class="rule"/>
+    <div class="box y"><span class="h">更本质的一对矛盾</span>
+      <b>大 M 端</b>:优势按算术为零。<b>小 M 端</b>:没有足够计算去掩盖任何集合通信,
+      而 all-reduce 是<b>纯延迟受限</b>(10 KB 与 640 KB 同价),<b>结构上藏不住</b>。<br/>
+      ⇒ <b>「要藏住通信需要 M 大」与「M 大时优势为零」互相排斥。</b><br/>
+      <b>PP 与单卡是仅有的两个同时绕开两者的形态</b> —— 都不切 K、M 小、层内无集合通信。</div>
+  </div>
+  <span class="no">33 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">单卡 · 一</div>
+  <h2>为什么单卡以前跑不起来</h2>
+  <div class="bd">
+    <pre>RuntimeError: NPU out of memory. Tried to allocate 1.45 GiB
+  (60.96 GiB total; <b>59.70 GiB already allocated</b>; 359 MiB free)
+  File "vllm/model_executor/models/qwen2.py", line 551
+    self.lm_head = ParallelLMHead(...)</pre>
+    <div class="box l"><span class="h">崩在<u>构造期</u>,在我们的转换钩子之前</span>
+      vLLM 先用 <b>BF16 构造整个模型</b>,W4A8 转换在<b>加载之后</b>才跑。<br/>
+      ⇒ 峰值是 <b>BF16 的 61.0 GiB</b>,不是 W4A8 的 17.7 GiB。<b>差约 70 MB。</b></div>
+    <div class="box y"><span class="h">同一根因的三个病灶</span>
+      ① 64 层单卡 <b>OOM</b>;② 省下的内存只有 <b>29%</b> 变成 KV(碎片);
+      ③ 每次启动 <b>679 s</b> 转换。</div>
+  </div>
+  <span class="no">34 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">单卡 · 二</div>
+  <h2>解法:离线导出 int4 checkpoint</h2>
+  <div class="bd">
+    <table style="max-width:820px">
+      <thead><tr><th>交付</th><th>内容</th></tr></thead>
+      <tbody>
+      <tr><td><code>export_w4a8_checkpoint.py</code></td><td>BF16 → int4 离线导出器</td></tr>
+      <tr><td><code>midgroup_quant.py</code></td><td>vLLM <code>QuantizationConfig</code> + <code>LinearMethod</code>,<b>构造期即按 int4 分配</b></td></tr>
+      <tr><td><code>test_w4a8_ckpt_seam.py</code></td><td>逐位门禁</td></tr>
+      </tbody>
+    </table>
+    <div class="box w"><span class="h">产物与门禁</span>
+      <code>QwQ-32B-W4A8-MG</code> = <b>18.96 GB</b>,448 投影,350 s。<br/>
+      接缝门禁 <b>144/144 逐位通过</b> —— 查了<b>逐投影</b>与<b>融合</b>两件事
+      (vLLM 会把 q/k/v 融成 <code>qkv_proj</code>,融合若改变量化结果,逐投影检查看不见)。</div>
+    <div class="box l"><span class="h">一条限制</span>
+      <b>checkpoint 绑定 TP 度</b>:行并行切 K 会切断组边界(K=5120/GK=1024,TP=4 切点 1280 落在组内)。
+      已做成<b>显式报错</b>而非静默错算。</div>
+  </div>
+  <span class="no">35 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">单卡 · 三</div>
+  <h2>单卡实测:完整 64 层跑通</h2>
+  <div class="bd">
+    <pre>Loading model weights took          17.8465 GB
+GPU KV cache size:                  <b>143,744 tokens</b>
+rank 0 quant_methods: {'MidGroupW4A8LinearMethod': <b>256</b>}   ← 64层 × 4投影</pre>
+    <table style="max-width:760px">
+      <thead><tr><th>量</th><th class="n">预测</th><th class="n">实测</th></tr></thead>
+      <tbody>
+      <tr><td>权重</td><td class="n">17.66 GiB</td><td class="n w">17.85 GB</td></tr>
+      <tr><td>KV tokens</td><td class="n">144 K 理论 / 106 K 含碎片</td><td class="n w"><b>143,744</b> ← 碎片消失</td></tr>
+      <tr><td>batch=1</td><td class="n">33.0 tok/s</td><td class="n w"><b>33.11</b></td></tr>
+      <tr><td>batch=16</td><td class="n">392 tok/s</td><td class="n w"><b>399.79</b></td></tr>
+      </tbody>
+    </table>
+    <div class="box w"><span class="h">每卡吞吐:单卡 33.1 · TP=4 每卡 9.3 · PP=4 每卡 6.9 ⇒ <u>3.6–4.8×</u></span>
+      且<b>真实权重(非随机)生成中英文均连贯</b> —— 全项目第一次。</div>
+  </div>
+  <span class="no">36 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">单卡 · 四</div>
+  <h2>长上下文:下一个瓶颈是 KV,不是权重</h2>
+  <div class="bd">
+    <table style="max-width:800px">
+      <caption>单卡 64 层,batch=1,实测</caption>
+      <thead><tr><th class="n">上下文</th><th class="n">step</th><th class="n">tok/s</th><th class="n">KV 流量/步</th><th class="n">KV 占每步</th></tr></thead>
+      <tbody>
+      <tr><td class="n">1 K</td><td class="n">30.7 ms</td><td class="n">32.6</td><td class="n">0.27 GB</td><td class="n">~2%</td></tr>
+      <tr><td class="n">4 K</td><td class="n">32.6 ms</td><td class="n">30.7</td><td class="n">1.07 GB</td><td class="n">~9%</td></tr>
+      <tr><td class="n">16 K</td><td class="n">41.2 ms</td><td class="n">24.3</td><td class="n">4.29 GB</td><td class="n">~28%</td></tr>
+      <tr style="background:#fdf5f6"><td class="n"><b>32 K</b></td><td class="n"><b>52.9 ms</b></td><td class="n"><b>18.9</b></td><td class="n"><b>8.59 GB</b></td><td class="n l"><b>~43%</b></td></tr>
+      </tbody>
+    </table>
+    <div class="box l"><span class="h">实测反推的带宽</span>
+      attention 读 KV <b>≈375 GB/s</b>,权重侧 <b>≈725 GB/s</b>。
+      按<b>时间</b>算的交叉点是 <b>~37.5 K tokens</b>(不是按字节算的 72 K)。<br/>
+      plen=32768 时每步权重 26.6 ms / KV 22.9 ms —— <b>几乎各半,与预测自洽。</b></div>
+  </div>
+  <span class="no">37 / 46</span>
+</section>
+<section class="pg">
+  <div class="tag">外推 · 一</div>
+  <h2>单卡内存账:35 GiB 是怎么来的</h2>
+  <div class="bd">
+    <table style="max-width:660px">
+      <tbody>
+      <tr><td>卡总量</td><td class="n"><b>60.96 GiB</b></td><td class="note">标称 65 G 是<b>十进制 GB</b></td></tr>
+      <tr><td><code>gpu_memory_utilization=0.90</code> 让出</td><td class="n l">−6.10</td><td class="note">我们自己设的安全边际,<b>可调</b></td></tr>
+      <tr><td>权重</td><td class="n">−17.85</td><td class="note">实测</td></tr>
+      <tr><td>激活 + 图捕获</td><td class="n">−1.92</td><td class="note">很小</td></tr>
+      <tr style="background:#f4faf6"><td><b>KV(实测)</b></td><td class="n w"><b>35.09</b></td><td class="note">= 143,744 tok @ bf16</td></tr>
+      </tbody>
+    </table>
+    <div class="box"><span class="h">还能再要回来</span>
+      <code>util</code> 提到 <b>0.97</b> ⇒ KV <b>39.36 GiB</b>。安全边际是唯一的大头。</div>
+  </div>
+  <span class="no">38 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">外推 · 二</div>
+  <h2>如果把 KV 也压缩:额度</h2>
+  <div class="bd">
+    <table>
+      <caption>KV cache 目前是 <b>bf16、完全没被量化过</b> —— 本工作只动了 Linear 的 W 和 A</caption>
+      <thead><tr><th class="n">util</th><th class="n">KV 预算</th><th class="n">bf16(现状)</th><th class="n">int8</th><th class="n">int4</th></tr></thead>
+      <tbody>
+      <tr><td class="n">0.90</td><td class="n">35.09 GiB</td><td class="n">144 K</td><td class="n w">287 K</td><td class="n w">575 K</td></tr>
+      <tr><td class="n">0.95</td><td class="n">38.14 GiB</td><td class="n">156 K</td><td class="n w">312 K</td><td class="n w">625 K</td></tr>
+      <tr><td class="n">0.97</td><td class="n">39.36 GiB</td><td class="n">161 K</td><td class="n w">322 K</td><td class="n w"><b>645 K</b></td></tr>
+      </tbody>
+    </table>
+    <div class="box w"><span class="h">512 K 上下文用 int4 KV 只需 32.0 GiB</span>
+      当前的 35.09 GiB <b>就够,还有余量</b> —— 单卡 512K 上下文在内存上是成立的。</div>
+    <div class="box y">⚠ 但这是<b>额度总数</b>,由所有并发请求共享;
+      且单条序列仍被 <code>max_position_embeddings=40960</code> 卡住,更长需 YaRN。</div>
+  </div>
+  <span class="no">39 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">外推 · 三</div>
+  <h2>但换来的是长度,不是速度</h2>
+  <div class="bd">
+    <table style="max-width:800px">
+      <caption>按实测 KV 有效带宽 375 GB/s + 权重侧 26.6 ms 外推</caption>
+      <thead><tr><th class="n">上下文 · KV 位宽</th><th class="n">KV 字节/步</th><th class="n">step</th><th class="n">tok/s</th></tr></thead>
+      <tbody>
+      <tr><td class="n">32 K · bf16(实测)</td><td class="n">8.59 GB</td><td class="n">52.9 ms</td><td class="n">18.9</td></tr>
+      <tr><td class="n">32 K · int4</td><td class="n">2.15 GB</td><td class="n">32.3 ms</td><td class="n w">30.9</td></tr>
+      <tr><td class="n">128 K · int4</td><td class="n">8.59 GB</td><td class="n">49.5 ms</td><td class="n">20.2</td></tr>
+      <tr style="background:#fdf5f6"><td class="n"><b>512 K · int4</b></td><td class="n">34.36 GB</td><td class="n">118 ms</td><td class="n l"><b>8.5</b></td></tr>
+      </tbody>
+    </table>
+    <div class="box l"><span class="h">注意第 3 行与第 1 行的 KV 字节相同 ⇒ step 也几乎相同</span>
+      决定每步耗时的是 <b>KV 字节 = 上下文 × 位宽</b>。<br/>
+      <b>压位宽只是让你在同样的时间预算里放 4 倍的 token,不是让同样的 token 快 4 倍。</b></div>
+    <div class="box">512 K 跑在 <b>8.5 tok/s</b>:能跑,但不是一个划算的工作点。</div>
+  </div>
+  <span class="no">40 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">外推 · 四</div>
+  <h2>三道关,和该走的那一步</h2>
+  <div class="bd top">
+    <div class="box l"><b>① 单序列仍卡在 40,960。</b>512K 单条要 YaRN <b>12.5×</b>,远超验证过的 4×,质量存疑。
+      575K 是<b>额度</b>,拆成多条并发才是现实用法。</div>
+    <div class="box l"><b>② int4 KV 的精度风险远大于 int4 权重。</b>KV 直接进 softmax,对量化噪声更敏感;
+      而 W4A8 <b>本来就还没过任务门禁</b>,再叠一层会复合。</div>
+    <div class="box l"><b>③ 工程上不是小改动。</b>int4 KV 要 attention kernel 读并反量化,
+      而 <b>attention 不是我们的代码</b>。这是开新项目。</div>
+    <hr class="rule"/>
+    <table style="max-width:820px">
+      <thead><tr><th></th><th class="n">额度</th><th class="n">32K 速度</th><th class="n">带宽拐点</th><th>风险</th></tr></thead>
+      <tbody>
+      <tr><td>现状 bf16</td><td class="n">144 K</td><td class="n">18.9 tok/s</td><td class="n">37.5 K</td><td>—</td></tr>
+      <tr style="background:#f4faf6"><td><b>int8</b></td><td class="n w"><b>287 K</b></td><td class="n w"><b>26.3</b></td><td class="n w"><b>75 K</b></td><td class="w">低,业界常规档</td></tr>
+      <tr><td>int4</td><td class="n">575 K</td><td class="n">30.9</td><td class="n">150 K</td><td class="l">高,且要自写 attention</td></tr>
+      </tbody>
+    </table>
+    <div class="box w"><b>int8 一步就把额度翻倍、32K 提速 39%、拐点推到 75 K</b>,
+      且大概率无需碰 attention kernel。<b>int4 的边际收益要付的代价,比第一步大得多。</b></div>
+  </div>
+  <span class="no">41 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">精度</div>
+  <h2>精度:一个<u>被挂起的</u> go / no-go</h2>
+  <div class="bd">
+    <div class="two">
+      <div>
+        <table>
+          <caption>PPL(完整 split,相对 W8A8)</caption>
+          <tbody>
+          <tr><td>w4a8-mg1024-asym</td><td class="n w"><b>+3.56%</b></td><td>过 ≤5%</td></tr>
+          <tr><td>GPTQ(asym)</td><td class="n l">+4.98%</td><td class="l">反而更差</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <table>
+          <caption>GLUE(limit 500/任务,0-shot)</caption>
+          <tbody>
+          <tr><td>w8a8 vs bf16</td><td class="n w">−0.1 点</td><td>无损</td></tr>
+          <tr><td><b>asym vs w8a8</b></td><td class="n l"><b>−4.5 点</b></td><td class="l">不过</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="box l"><span class="h">以任务评测为准</span>
+      方案原文写明「若指标冲突,以任务评测为准」。<b>QwQ-32B 是推理模型</b>:
+      PPL 只测单步 next-token,<b>测不出误差沿几千 token 推理链的累积</b>。</div>
+    <div class="box y"><span class="h">但现在第一次可以真做了</span>
+      此前门禁卡在「没有真实校准权重」,所有评测都在 fake-quant 侧。
+      <b>磁盘上有了真 checkpoint,可以直接跑端到端 GSM8K / C-Eval</b>,
+      验证 fake-quant 的结论在真实 kernel 上是否复现。</div>
+  </div>
+  <span class="no">42 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">讨论</div>
+  <h2>FSDP / CP:切 M 保 K,避开 K*</h2>
+  <div class="bd">
+    <table style="font-size:14.5px">
+      <thead><tr><th>并行</th><th>切什么</th><th>GEMM 几何</th><th>层内集合通信的<b>性质</b></th></tr></thead>
+      <tbody>
+      <tr style="background:#fdf5f6"><td><b>TP</b></td><td>行并行切 <b>K</b></td><td class="l">跌出收益域</td><td class="l">激活 all-reduce · <b>延迟受限</b> · 藏不住</td></tr>
+      <tr style="background:#f4faf6"><td><b>PP / 单卡</b></td><td>切层 / 不切</td><td class="w">完全不变</td><td class="w"><b>无</b></td></tr>
+      <tr><td><b>FSDP</b></td><td>切<b>权重</b></td><td class="w">K、N 不变,M↓</td><td>权重 all-gather · <b>带宽受限</b> · <b>可预取</b></td></tr>
+      <tr><td><b>CP</b></td><td>切<b>序列</b></td><td class="w">K、N 不变,M↓</td><td class="w">GEMM 侧<b>无</b>;attention 需 ring 传 KV</td></tr>
+      </tbody>
+    </table>
+    <div class="box w"><b>成立的部分</b>:FSDP 把「藏不住的通信」换成「藏得住的」,
+      而 <b>int4 让流量比 BF16 FSDP 小 4 倍</b>(15.9 vs 62 GB)。
+      按实测 ring 带宽,全隐藏门槛 <b>≥9.2 K / 16.3 K tokens/step</b>。</div>
+    <div class="box l"><b>不成立的部分</b>:prefill 的 M 除以 4 仍 ≫512 ⇒ 只能<b>打平</b>,不能赢;
+      decode 更不能用(算 0.3 ms vs 传 9.2 ms)。<b>收益要记在容量与通信账上,不是 GEMM 账上。</b></div>
+  </div>
+  <span class="no">43 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">部署</div>
+  <h2>部署建议:按工作点选</h2>
+  <div class="bd">
+    <table>
+      <thead><tr><th>场景</th><th>选哪条</th><th class="n">依据</th></tr></thead>
+      <tbody>
+      <tr style="background:#f4faf6"><td><b>单卡 / 省卡部署</b></td><td class="w"><b>我们的 W4A8</b></td><td class="n">19 GB,BF16 装不下;每卡吞吐 3.6–4.8×</td></tr>
+      <tr style="background:#f4faf6"><td>解码 · PP · batch ≤ 64</td><td class="w"><b>我们的 W4A8</b></td><td class="n">2.0–2.2× BF16</td></tr>
+      <tr style="background:#f4faf6"><td>长上下文解码</td><td class="w"><b>我们的 W4A8</b></td><td class="n">8K 仍 2.05×,劣化最小</td></tr>
+      <tr><td>高并发(batch ≥ 256)</td><td>我们的 W8A8</td><td class="n">W4A8 掉到 0.86–0.91×</td></tr>
+      <tr><td>prefill / 长 prompt</td><td>我们的 W8A8</td><td class="n">W4A8 只有 0.64–0.69×</td></tr>
+      <tr><td>对<b>输出质量</b>有要求</td><td class="l">先补精度门禁</td><td class="n">GLUE −4.5 点</td></tr>
+      </tbody>
+    </table>
+    <div class="box w"><span class="h">最自然的结论:prefill / decode 分离部署</span>
+      prefill 走 W8A8,decode 走 mid-group W4A8。<b>不要</b>只因为「权重更小」就全链路铺开。</div>
+  </div>
+  <span class="no">44 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">欠账</div>
+  <h2>欠账与下一步</h2>
+  <div class="bd top">
+    <h3 style="margin-top:0">仍阻断「可用性」结论</h3>
+    <table style="font-size:14.5px">
+      <tbody>
+      <tr><td style="width:170px"><b>任务门槛 + GSM8K + 中文</b></td><td>GLUE −4.5 点是唯一任务指标;<b>现在有真 checkpoint,可以真跑了</b></td></tr>
+      <tr><td><b>重复性门禁</b></td><td>≥3 次重复 + 离散度,<b>从未做过</b>;噪声带比很多效果还宽</td></tr>
+      <tr><td><b>在线服务口径</b></td><td>TTFT / TPOT 分位数、4K–64K、真 server</td></tr>
+      <tr style="background:#f4faf6"><td><s>真实校准 checkpoint</s></td><td class="w"><b>✔ 已完成(本轮)</b></td></tr>
+      </tbody>
+    </table>
+    <h3>性能侧路线(按优先级)</h3>
+    <ol style="font-size:15.5px">
+      <li><b>KV int8</b> —— 单卡这条线上收益最大,且与已有工作正交,不碰我们的 kernel;</li>
+      <li><b>导一份 W8A8 checkpoint</b> —— 现在单卡缺对照组,W8A8 还走老路径也 OOM;</li>
+      <li><b>profile split</b> —— 拆开 TP 那 1.16× 里通信占多少,同时给 kernel 与通信两条支线定价;</li>
+      <li><b>修核心 kernel</b> —— 把 M=16 的 K* 从 1665 压到 1280 以下,<b>只打固定项</b>(只影响 TP 场景)。</li>
+    </ol>
+  </div>
+  <span class="no">45 / 46</span>
+</section>
+
+<section class="pg">
+  <div class="tag">结论</div>
+  <h2>结论</h2>
+  <div class="bd">
+    <div class="box w"><span class="h">执行侧 —— 全链路打通</span>
+      INT4 Cube 验证 → MSD 分解 → mid-group → 非对称 → ragged-K → torch 算子 →
+      接入 vLLM → <b>离线 int4 checkpoint</b> → <b>单卡跑通完整 64 层并生成正常文本</b>。
+      数值上有<b>逐位 / 逐字节 / 负对照</b>三级门禁把关。</div>
+    <div class="box"><span class="h">性能侧 —— 收益域被机理解释清楚</span>
+      赢在<b>小 M × 大 K × 层内无集合通信</b>;区间之外(prefill、高并发、TP)一致地输,
+      <b>而那是同一笔固定开销的三个投影</b>。</div>
+    <div class="box w"><span class="h">内存侧 —— 唯一不随工作点换位的收益</span>
+      <b>62 → 19 GB</b>,单卡 KV <b>143,744 tokens</b>,每卡吞吐 <b>3.6–4.8×</b>。
+      <b>这是能力差异,不是速度差异。</b>而下一个瓶颈已经指明:<b>KV 而非权重</b>。</div>
+    <div class="box l"><span class="h">可用性侧 —— 还不能宣称</span>
+      任务门禁没过,重复性门禁没做。<b>但阻塞它们的前置(真实 checkpoint)已经解除。</b></div>
+  </div>
+  <span class="no">46 / 46</span>
+</section>
+
+</body>
+</html>

@@ -1,0 +1,7 @@
+arm,layers,tp,pp,graph,cudagraph_mode,batch,prompt_len,out_len,total_s,gen_tok,step_us,per_layer_us,throughput_tok_s,prefill_ms,async_sched
+w4a8,4,1,1,aclgraph,PIECEWISE(default),1,128,64,0.4371,64,6829.93,1707.483,146.41,,0
+w4a8,16,1,1,aclgraph,PIECEWISE(default),1,128,64,0.9020,64,14093.54,880.846,70.95,,0
+w8a8,4,1,1,aclgraph,PIECEWISE(default),1,128,64,0.4460,64,6968.97,1742.241,143.49,,0
+w8a8,16,1,1,aclgraph,PIECEWISE(default),1,128,64,0.9731,64,15204.72,950.295,65.77,,0
+bf16,4,1,1,aclgraph,PIECEWISE(default),1,128,64,0.5553,64,8676.97,2169.243,115.25,,0
+bf16,16,1,1,aclgraph,PIECEWISE(default),1,128,64,1.4967,64,23386.12,1461.633,42.76,,0

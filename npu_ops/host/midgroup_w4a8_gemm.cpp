@@ -24,6 +24,7 @@
 // activation in one pass, in exactly this layout.
 
 #include "utils.h"
+#include "../kernel/mg_kgeom.h"
 #include "aclrtlaunch_midgroup_w4a8_gemm_m16_g1024_asym.h"
 #include "aclrtlaunch_midgroup_w4a8_gemm_m64_g1024_asym.h"
 #include "aclrtlaunch_midgroup_w4a8_gemm_m128_g1024_asym.h"
@@ -62,13 +63,22 @@ at::Tensor run_midgroup_w4a8_gemm(const at::Tensor &a_hi, const at::Tensor &a_lo
 
     const int64_t M = a_hi.size(0);
     const int64_t N = w_q.size(0);
-    TORCH_CHECK(a_hi.size(1) == K / 2 && w_q.size(1) == K / 2,
-                "midgroup_w4a8_gemm: packed row length must be K/2");
-    TORCH_CHECK(K % kGroup == 0, "midgroup_w4a8_gemm: K must be a multiple of ", kGroup,
-                "; got ", K);
+    // K is ARBITRARY.  G = ceil(K/GK) and the packed rows are Kpad/2 bytes, where
+    // each group is zero-padded up to an int4 fractal (mg_kgeom.h).  There is no
+    // K alignment requirement to state here -- that was never a property of the
+    // maths, only of the old kernel, and pushing it onto callers is what made TP
+    // look impossible (MGCKPT/P6.5_TP.md).
+    const int64_t KbPad = static_cast<int64_t>(
+        mgk::KPadElems(static_cast<unsigned>(K), static_cast<unsigned>(kGroup),
+                       mgk::kCubeKElemsInt4)) / 2;
+    TORCH_CHECK(a_hi.size(1) == KbPad && w_q.size(1) == KbPad,
+                "midgroup_w4a8_gemm: packed row length must be Kpad/2 = ", KbPad,
+                " for K=", K, " (group-padded layout); got a_hi ", a_hi.size(1),
+                " w_q ", w_q.size(1));
     TORCH_CHECK(N % kTileN == 0, "midgroup_w4a8_gemm: N must be a multiple of ", kTileN,
                 "; got ", N);
-    const int64_t G = K / kGroup;
+    const int64_t G = static_cast<int64_t>(
+        mgk::NumGroups(static_cast<unsigned>(K), static_cast<unsigned>(kGroup)));
     TORCH_CHECK(a_scale.size(0) == G && a_scale.size(1) == M,
                 "midgroup_w4a8_gemm: a_scale must be group-major [K/group, M]");
     TORCH_CHECK(w_scale.size(0) == G && w_scale.size(1) == N,
@@ -85,8 +95,8 @@ at::Tensor run_midgroup_w4a8_gemm(const at::Tensor &a_hi, const at::Tensor &a_lo
     // for direct callers that hand over a ragged activation (the benches do).
     // If you ever see PadV3/MemSet in an engine profile, the two TileMFor
     // definitions have drifted -- see P4_E2E.md D10.
-    const at::Tensor aHi = Pad2D(a_hi.contiguous(), Mp, K / 2);
-    const at::Tensor aLo = Pad2D(a_lo.contiguous(), Mp, K / 2);
+    const at::Tensor aHi = Pad2D(a_hi.contiguous(), Mp, KbPad);
+    const at::Tensor aLo = Pad2D(a_lo.contiguous(), Mp, KbPad);
     const at::Tensor aS  = Pad2D(a_scale.contiguous(), G, Mp);
     const at::Tensor aK  = Pad2D(a_ksum.contiguous(), G, Mp);
     const at::Tensor wQ  = w_q.contiguous();

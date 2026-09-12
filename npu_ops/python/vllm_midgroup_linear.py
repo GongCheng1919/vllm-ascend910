@@ -23,6 +23,7 @@ points), so end-to-end numbers from this are engineering validation only.
 """
 from __future__ import annotations
 
+import importlib
 import os
 import sys
 from typing import Optional
@@ -102,7 +103,24 @@ def patch_w4a8_dynamic(qkv_o_max_m: int = QKV_O_MAX_M) -> None:
     cannot take (K not a multiple of 1024, N not a multiple of 128) keep the
     stock path, so a partially-supported model still runs.
     """
-    from vllm_ascend.quantization import w4a8_dynamic as mod
+    # vllm-ascend 0.23.0 moved this module (P10 Phase B symbol audit): the class
+    # name and the `apply(self, layer, x, bias=None, tp_rank=None)` signature are
+    # unchanged, only the path moved and the base class became AscendLinearScheme.
+    #   <=0.13.0  vllm_ascend.quantization.w4a8_dynamic
+    #   >=0.23.0  vllm_ascend.quantization.methods.w4a8
+    mod = None
+    for path in ("vllm_ascend.quantization.methods.w4a8",
+                 "vllm_ascend.quantization.w4a8_dynamic"):
+        try:
+            mod = importlib.import_module(path)
+            break
+        except ImportError:
+            continue
+    if mod is None:
+        raise ImportError(
+            "AscendW4A8DynamicLinearMethod not found in either "
+            "vllm_ascend.quantization.methods.w4a8 (>=0.23.0) or "
+            "vllm_ascend.quantization.w4a8_dynamic (<=0.13.0)")
 
     cls = mod.AscendW4A8DynamicLinearMethod
     if getattr(cls, "_midgroup_patched", False):

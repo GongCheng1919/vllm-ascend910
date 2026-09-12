@@ -32,6 +32,7 @@
 #include "data_utils.h"
 #include "bf16.h"
 #include "gemm_ref.h"
+#include "mg_kgeom.h"
 
 namespace mg {
 
@@ -67,19 +68,27 @@ inline int Run(int argc, char** argv, uint32_t tileM, uint32_t gk, uint32_t inne
     const uint32_t N = static_cast<uint32_t>(args.cols);
     const uint32_t K = static_cast<uint32_t>(args.k);
 
-    if (M == 0 || N == 0 || K == 0 || (N % kTileN) || (K % gk) || (K % innerK)) {
-        std::cerr << "shape constraint: N multiple of 128; K multiple of GK=" << gk
-                  << " and of innerK=" << innerK << "\n";
+    // K is ARBITRARY -- see kernels/mg_kgeom.h.  The op absorbs the misalignment
+    // in its own packed layout, so the only thing left to reject here is a shape
+    // the HARDWARE cannot express (N below the fractal tiling, or a padded row
+    // longer than Nd2Nz's uint16 srcDValue).  `innerK` is no longer a constraint:
+    // the last slice of the last group is simply short.
+    if (M == 0 || N == 0 || K == 0 || (N % kTileN)) {
+        std::cerr << "shape constraint: N multiple of 128 (K is unconstrained)\n";
         return 1;
     }
     const uint32_t Mp = ((M + tileM - 1) / tileM) * tileM;
-    if (K / 2 > 65535u) {
-        std::cerr << "K/2 must fit in uint16 (Nd2Nz srcDValue)\n";
+    const uint32_t kAlign = mgk::kCubeKElemsInt4;
+    const uint32_t Kpad   = mgk::KPadElems(K, gk, kAlign);
+    const uint32_t KbPad  = Kpad / 2;
+    if (KbPad > 65535u) {
+        std::cerr << "padded K/2 must fit in uint16 (Nd2Nz srcDValue)\n";
         return 1;
     }
     PrintHeader(opName, args);
+    (void)innerK;
 
-    const uint32_t numG = K / gk;
+    const uint32_t numG = mgk::NumGroups(K, gk);
     const size_t aCount = static_cast<size_t>(Mp) * K;
     const size_t wCount = static_cast<size_t>(N) * K;
     const size_t yCount = static_cast<size_t>(Mp) * N;
@@ -98,9 +107,12 @@ inline int Run(int argc, char** argv, uint32_t tileM, uint32_t gk, uint32_t inne
         ? ReadBin<int8_t>(args.load_dir + "/w_q.bin", wCount)
         : GenerateInt8(wCount, args.seed + 101, -8, 7);
 
+    // The unpacked host arrays are [rows, K] with the REAL K; only the device
+    // payload carries the group padding, so the CPU reference below never sees
+    // it and a kernel that mishandles the pad fails the check.
     std::vector<int8_t> hAHi, hALo;
-    SplitInt8ToInt4Planes(hA, Mp, K, hAHi, hALo);
-    const std::vector<int8_t> wDev = PackInt4(hW, N, K);
+    SplitInt8ToInt4PlanesGrouped(hA, Mp, K, gk, hAHi, hALo);
+    const std::vector<int8_t> wDev = PackInt4Grouped(hW, N, K, gk);
     const std::vector<int32_t> hKSum = WeightKSumPerGroup(hW, N, K, gk);
 
     // a_ksum is always the true negated row sum: it is cheap, and feeding it
@@ -156,11 +168,26 @@ inline int Run(int argc, char** argv, uint32_t tileM, uint32_t gk, uint32_t inne
             std::vector<uint16_t> wS(hWScaleG.begin(), hWScaleG.begin() + N);
             ReferencePerchannelGemm(hA, aS, hW, wS, hYRef, M, N, K);
         } else {
+            // Mp, not M: the kernel is launched with the padded row count and
+            // strides a_scale by it.  See the note on ReferenceMidGroupGemm.
             ReferenceMidGroupGemm(hA, hAScaleG, hW, hWScaleG,
                                   asym ? hWZeroG : std::vector<uint16_t>{},
-                                  hYRef, M, N, K, gk);
+                                  hYRef, M, N, K, gk, Mp);
         }
         std::cout << "[debug]      CPU reference done\n" << std::flush;
+        // A degenerate reference makes the check vacuous: CompareBF16 reports
+        // snr_db = 999 (i.e. "bit-exact") whenever the error energy is zero, so an
+        // all-zero reference against an all-zero device buffer PASSES.  That is the
+        // same shape of failure as P6 D8 -- a path that does nothing looks exactly
+        // like a path that works -- so refuse to grade it.
+        size_t nz = 0;
+        for (uint16_t v : hYRef) nz += (v != 0);
+        if (nz * 20 < hYRef.size()) {
+            std::cerr << "[check]      REFUSING: reference is " << nz << "/"
+                      << hYRef.size() << " non-zero -- the comparison would be "
+                      "vacuous, not a pass\n";
+            return 1;
+        }
     }
 
     ACL_CHECK(aclInit(nullptr));
@@ -231,6 +258,8 @@ inline int Run(int argc, char** argv, uint32_t tileM, uint32_t gk, uint32_t inne
               << " (aicore=" << coreNum << ")  tileM=" << tileM
               << " (cube tile " << (2 * tileM) << "x" << kTileN << ")"
               << "  GK=" << gk << " groups=" << numG
+              << " lastGK=" << mgk::GroupRealElems(numG - 1, K, gk)
+              << "  K=" << K << (Kpad != K ? " -> padded " + std::to_string(Kpad) : "")
               << "  M=" << M << (Mp != M ? " -> padded " : " ")
               << (Mp != M ? std::to_string(Mp) : std::string())
               << "  tiles=" << numTiles

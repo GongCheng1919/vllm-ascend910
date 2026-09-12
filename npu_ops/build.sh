@@ -4,7 +4,10 @@
 #   bash npu_ops/build.sh
 #
 # Build for a specific interpreter (vLLM lives in .venv with torch 2.8):
-#   PYTHON=.venv/bin/python BUILD_DIR=build-venv bash npu_ops/build.sh
+#   PYTHON="$PWD/.venv/bin/python" BUILD_DIR=build-venv bash npu_ops/build.sh
+# PYTHON must be ABSOLUTE: this script cd's into npu_ops/, so a relative
+# `.venv/bin/python` resolves to `npu_ops/.venv/...` and the build dies with a
+# bare `EXIT=127` and an otherwise empty log.
 # The ABI/torch version must match the interpreter that will load the .so.
 set -euo pipefail
 

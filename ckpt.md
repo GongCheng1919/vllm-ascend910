@@ -30,3 +30,8 @@ P0的探针揭示了应用W4A8-mg相比于W8A8-pc和W8A8-mg（这个在nitro中�
 从MGCKPT/P5_KERNEL_OPT.md 继续，我们接下来干嘛？
 
 从MGCKPT/P6_TP.md继续，我们当前正在推进P6，即在VLLM上部署应用我们的TP和PP的W4A8和W8A8的结果，先复盘当前进展，然后确认当前工作
+
+从MGCKPT/MGCKPT/P6.5_TP.md继续，我们当天正在做gemm+allreduce融合问题，两条路线：hccl调用还是自己写，现在自己写的部分遇到了MC2阻塞，对吧？确认进度然后继续吧。
+
+从MGCKPT/继续，我们正在做vLLM上的QwQ32B W4A8推理，现在应该已经可以实现端到端的高效推理了吗？我应该是已经做完了完整的从kernel 到layer再到e2e的推理优化，并且实现了和W8A8以及BF16分别的decode和prefill阶段上不同并发和不同长上下文以及不同TP4和P 
+  P4的并行运行上面的测试，我需要你帮我整理这部分内容，形成一次html的report，就放到reports/文件夹，即可，注意我要的是完整的项目报告哈
