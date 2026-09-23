@@ -1,0 +1,5 @@
+# bind/binding.cpp stays tracked -- it is hand-written source, not generated.
+build/
+bind/*.so
+*.log
+__pycache__/
